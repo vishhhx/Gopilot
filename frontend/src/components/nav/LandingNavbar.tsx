@@ -32,7 +32,7 @@ function LandingNavbar() {
 
   return (
     <motion.div
-      className=" fixed top-0 mx-auto -right-0 -left-0 z-50  dark:bg-black/50 p-3 flex justify-between items-center gap-20 dark:text-neutral-100 backdrop-blur-lg transition-all duration-300  "
+      className=" fixed top-0 mx-auto -right-0 -left-0 z-50   p-3 flex justify-between items-center gap-20 dark:text-neutral-100 backdrop-blur-lg transition-all duration-300  "
       initial={{ opacity: 1, filter: "blur(10px)" }}
       animate={{ opacity: [0, 0.5, 1], filter: "blur(0px)" }}
       transition={{

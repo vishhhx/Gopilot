@@ -6,6 +6,8 @@ import { useAppDispatch } from "./store/hooks";
 import { AuthServices } from "./services";
 import { addUser } from "./store/slices/authSlice";
 import { LoaderOne } from "./components/ui/loader";
+import { axiosInstance } from "./utils";
+import { setSessions } from "./store/slices/sessionSlice";
 
 function App() {
   const { theme, setTheme } = useTheme();
@@ -28,7 +30,9 @@ function App() {
     const fetchUser = async () => {
       try {
         const response = await AuthServices.getCurrentUser();
-        console.log(response);
+        const { data } = await axiosInstance.get("/session/get-all-sessions");
+        console.log(data);
+        dispatch(setSessions(data.data));
         dispatch(addUser(response));
       } catch (error) {
         console.error("Failed to fetch user", error);

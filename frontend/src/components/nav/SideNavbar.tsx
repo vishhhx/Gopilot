@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import Logo from "./Logo";
 import { useAppSelector } from "@/store/hooks";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
+import { Button } from "../ui/button";
 
 interface CollapsedProps {
   collapsed: boolean;
@@ -344,7 +345,8 @@ export default function Sidebar() {
   const location = useLocation();
   const [activeItem, setActiveItem] = useState<string>(location.pathname);
   const [collapsed, setCollapsed] = useState<boolean>(false);
-
+  const sessions = useAppSelector((state) => state.session.sessions);
+  // const user = useAppSelector((state) => state.auth.authData);
   useEffect(() => {
     setActiveItem(location.pathname);
   }, [location.pathname]);
@@ -420,6 +422,43 @@ export default function Sidebar() {
             );
           })}
         </nav>
+        <div>
+          {/* TASKS SECTION (SESSIONS) */}
+          {sessions && sessions.length > 0 && (
+            <div className={cn("mt-6", collapsed && "px-1")}>
+              {!collapsed && (
+                <p className="text-xs text-muted-foreground uppercase tracking-wide px-3">
+                  Tasks
+                </p>
+              )}
+
+              <div className="mt-2 space-y-1">
+                {sessions.map((s) => {
+                  const isActive = location.pathname.includes(s.sessionId);
+                  return (
+                    <Button
+                      key={s._id}
+                      onClick={() => handleNavigate(`/task/${s.sessionId}`)}
+                      variant={isActive ? "secondary" : "ghost"}
+                      className={cn(
+                        "w-full justify-start text-left transition-all rounded-xl",
+                        isActive && "font-medium shadow-sm"
+                      )}
+                    >
+                      {collapsed ? (
+                        <span className="text-xs font-bold">T</span>
+                      ) : (
+                        <span className="text-sm truncate">
+                          {s.sessionId.substring(0, 20)}...
+                        </span>
+                      )}
+                    </Button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       <div>

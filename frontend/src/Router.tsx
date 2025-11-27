@@ -9,9 +9,11 @@ import Login from "./pages/public/Authentication/Login";
 import SignIn from "./pages/public/Authentication/SignIn";
 import AuthenticationLayout from "./pages/public/Authentication/AuthenticationLayout";
 import AutomateLayout from "./pages/private/automate/AutomateLayout";
-import Connect from "./pages/private/automate/Connect";
+
 import SettingLayout from "./pages/private/setting/SettingLayout";
 import IntegrationPage from "./pages/private/setting/IntegrationsPage";
+import New from "./pages/private/automate/New";
+import SessionChat from "./pages/private/automate/SessionChat";
 
 const router = createBrowserRouter(
   createRoutesFromElements(
@@ -23,8 +25,8 @@ const router = createBrowserRouter(
           <Route path="/register" element={<SignIn />} />
         </Route>
         <Route path="/" element={<AutomateLayout />}>
-          <Route path="new" element={<Connect />} />
-
+          <Route path="new" element={<New />} />
+          <Route path="/task/:sessionId" element={<SessionChat />} />
           <Route path="/settings" element={<SettingLayout />}>
             <Route path="integrations" element={<IntegrationPage />} />
           </Route>

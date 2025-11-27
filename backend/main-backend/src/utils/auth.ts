@@ -13,7 +13,7 @@ export class AuthHelper {
     }
   }
 
-  signUser(payload: JwtPayload, expiresIn: any = "15m"): string {
+  signUser(payload: JwtPayload, expiresIn: any = "7d"): string {
     try {
       return sign(payload, this.secret, { expiresIn: expiresIn });
     } catch (error) {

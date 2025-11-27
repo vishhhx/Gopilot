@@ -7,6 +7,8 @@ import { authRouter } from "./routes";
 import { connectionRouter } from "./routes/connetion";
 import path from "path";
 import { fileURLToPath } from "url";
+import { Agentrouter } from "./routes/agent";
+import { SesstionRouter } from "./routes/sesstion";
 
 const app: Application = express();
 const httpServer = createServer(app);
@@ -26,5 +28,8 @@ app.get("/api/v1/health", (req, res) => {
 });
 app.use("/api/v1/auth", authRouter);
 app.use("/api/v1/connection", connectionRouter);
+app.use("/api/v1/agent",Agentrouter)
+app.use("/api/v1/session",SesstionRouter)
+
 
 export { httpServer };

@@ -3,6 +3,7 @@ import LandingNavbar from "../../components/nav/LandingNavbar";
 import HeroSection from "../../components/Landing/HeroSection";
 import { motion } from "motion/react";
 
+
 function Landingpage() {
   return (
     <div className="bg-gray-100 dark:bg-black ">
@@ -20,6 +21,7 @@ function Landingpage() {
         <LandingNavbar />
         <HeroSection />
       </Container>
+     
     </div>
   );
 }

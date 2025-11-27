@@ -1,11 +1,15 @@
 import { useEffect } from "react";
 import { FaLongArrowAltRight } from "react-icons/fa";
-import heroImg from "../../assets/test.png"; // Update with GoPilot hero image
+
 import { motion, stagger, useAnimate } from "framer-motion";
 import { BackgroundRippleEffect } from "../ui/background-ripple-effect";
 
+import { TracingBeamFeatures } from "./TracingBeamFeatures";
+import PricingCards from "./PricingCards";
+import { MacbookScroll } from "../ui/macbook-scroll";
+import pajju from "../../assets/pajju.png";
 function HeroSection() {
-  const text = "Your AI Assistant for Gmail, Drive & Calendar";
+  const text = "Your AI Copilot for Gmail, Drive & Calendar";
   const [scope, animate] = useAnimate();
 
   useEffect(() => {
@@ -37,7 +41,7 @@ function HeroSection() {
         <div className="flex justify-center items-center mt-40">
           <div className="flex items-center dark:bg-black/50 bg-white/10 dark:text-neutral-100 py-1 px-3 rounded-xl backdrop-blur-lg hover:bg-[#e2e8f0] border border-[#94a3b8] gap-2 cursor-pointer transition">
             <p className="font-inter text-[13px] font-semibold">
-              Connect your Google account
+              Get started with your Google Workspace
             </p>
             <FaLongArrowAltRight className="w-4 h-4" />
           </div>
@@ -62,24 +66,24 @@ function HeroSection() {
         </motion.p>
 
         <p className="dark:text-neutral-400 w-[40rem] text-center text-neutral-700">
-          GoPilot helps you manage your emails, documents, and meetings
-          effortlessly. One AI assistant to handle Gmail, Drive, and Calendar in
-          a single, intuitive interface.
+          GoPilot brings Gmail, Drive, and Calendar together into one powerful
+          AI assistant. Search faster, summarize instantly, schedule meetings,
+          and manage your entire workflow through a single intelligent chat.
         </p>
       </div>
 
       {/* Buttons */}
       <div className="mt-10 flex gap-3 justify-center z-60">
-        <button className="py-2 px-3 text-neutral-100  bg-neutral-950 dark:bg-neutral-100 rounded-xl dark:text-black hover:scale-110 transition duration-300">
-          Get Started
+        <button className="py-2 px-3 text-neutral-100 bg-neutral-950 dark:bg-neutral-100 rounded-xl dark:text-black hover:scale-110 transition duration-300">
+          Start Free
         </button>
         <button className="py-2 px-3 text-neutral-950 dark:text-neutral-100 rounded-xl hover:scale-110 transition duration-300">
-          Learn More
+          Explore Features
         </button>
       </div>
 
       {/* Hero image */}
-      <div className="mx-auto mt-10">
+      {/* <div className="mx-auto mt-10">
         <motion.img
           initial={{ y: 150 }}
           animate={{ y: 0 }}
@@ -88,6 +92,21 @@ function HeroSection() {
           alt="GoPilot illustration"
           className="shadow-md mask-b-from-10% to-100%"
         />
+      </div> */}
+
+      <div className="mt-80">
+        <TracingBeamFeatures />
+      </div>
+
+      <div className="max-w-6xl mx-auto px-6 py-12 mt-20">
+        <h2 className="text-4xl font-bold text-center mb-6">
+          Choose Your GoPolit
+        </h2>
+        <PricingCards />
+      </div>
+
+      <div>
+        <MacbookScroll src={pajju} title="Made with Love by Vish " />
       </div>
     </div>
   );
