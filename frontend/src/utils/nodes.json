@@ -1,0 +1,68 @@
+[
+  {
+    "name": "agents",
+    " ": [
+      {
+        "type": "Agent",
+        "service": "gmail",
+        "name": "gmail-agents",
+        "svgpath": "/public/icons/Gmail.svg",
+        "agents": [
+          { "name": "gmailReaderAgent", "description": "Read emails" },
+          { "name": "gmailWriterAgent", "description": "Send emails" },
+          { "name": "gmailDeleteAgent", "description": "Delete emails" },
+          { "name": "gmailTrashAgent", "description": "Move emails to trash" }
+        ]
+      },
+      {
+        "type": "Agent",
+        "service": "sheets",
+        "name": "sheets-agents",
+        "svgpath": "/public/icons/Sheets.svg",
+        "agents": [
+          {
+            "name": "sheetsReaderAgent",
+            "description": "Read Google Sheets content"
+          },
+          {
+            "name": "sheetsWriterAgent",
+            "description": "Write values into Sheets"
+          },
+          {
+            "name": "sheetsFormattingAgent",
+            "description": "Apply formatting to Sheets"
+          },
+          {
+            "name": "sheetsHelperAgent",
+            "description": "Provide helper functions for Sheets"
+          },
+          {
+            "name": "sheetsManagementAgent",
+            "description": "Manage sheet tabs and structure"
+          },
+          {
+            "name": "sheetsStructureAgent",
+            "description": "Modify rows, columns and layout"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "others",
+    " ": [
+      {
+        "type": "Checker",
+        "data": {}
+      },
+      {
+        "type": "Error",
+        "data": {}
+      },
+      {
+        "type": "HIL",
+        "data": {}
+      }
+    ]
+  }
+]

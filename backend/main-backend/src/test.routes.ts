@@ -161,7 +161,7 @@ router.post("/testagent", async (req, res) => {
 
     const runResult = await run(calendarCoordinatorAgent, prompt, { context });
 
-    console.log("🟢 Final Output (text):", runResult.output_text);
+    console.log("🟢 Final Output (text):", runResult.finalOutput);
     console.log("🟢 Structured Output:", runResult.output);
 
     // Parse JSON safely

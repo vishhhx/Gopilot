@@ -3,17 +3,12 @@ import { RECOMMENDED_PROMPT_PREFIX } from "@openai/agents-core/extensions";
 import { z } from "zod";
 import { SheetsService } from "../utils/google/sheet";
 
-// ------------------------------------------------------------------
-// Interfaces & Helpers
-// ------------------------------------------------------------------
-
 export interface Tokens {
   service: string;
   refreshToken: string;
 }
 
 function getRefreshToken(tokens: Tokens[]) {
-  // console.log(tokens);
   const res = tokens.filter((token) => token.service === "sheets");
   if (res.length <= 0) {
     throw new Error("no refresh token of the sheets found");
@@ -21,21 +16,78 @@ function getRefreshToken(tokens: Tokens[]) {
   return res[0].refreshToken;
 }
 
+function handleApiError(error: any) {
+  console.error("API Error:", error);
+
+  if (error.code === 400) {
+    return {
+      success: false,
+      error:
+        "Invalid request parameters. Check your input data and range format.",
+      details: error.message,
+    };
+  } else if (error.code === 403) {
+    return {
+      success: false,
+      error:
+        "Permission denied. Check spreadsheet sharing settings and API permissions.",
+      details: error.message,
+    };
+  } else if (error.code === 404) {
+    return {
+      success: false,
+      error:
+        "Spreadsheet, sheet, or range not found. Verify the IDs and ranges.",
+      details: error.message,
+    };
+  } else if (error.code === 429) {
+    return {
+      success: false,
+      error: "Rate limit exceeded. Please try again later.",
+      details: error.message,
+    };
+  }
+
+  return {
+    success: false,
+    error: error?.message || "An unexpected error occurred",
+    details: error?.stack,
+  };
+}
+
 // Shared schema for cell values to prevent Zod validation crashes
-const cellValueSchema = z
-  .any()
-  .describe("The cell value (string, number, boolean, etc.)");
+const primitive = z.union([z.string(), z.number(), z.boolean(), z.null()]);
 
-// ------------------------------------------------------------------
-// Read Operations
-// ------------------------------------------------------------------
+// Array of primitives: items are explicit (no z.any())
+const primitiveArray = z.array(primitive);
 
+// 2D array (optional) — items are arrays of primitives
+const primitive2DArray = z.array(primitiveArray);
+
+// Simple object with primitive values (keys are strings, values are primitives)
+const simpleObject = z.record(primitive);
+
+// Object whose values are arrays of primitives (e.g., { "col": ["a","b"] })
+const objectOfPrimitiveArrays = z.record(primitiveArray);
+
+// Final union: includes only concrete typed branches
+export const cellValueSchema = z
+  .union([
+    primitive, // string|number|boolean|null
+    primitiveArray, // ["a","b", ...]
+    primitive2DArray, // [["a","b"], ["c","d"]] — if you might store small arrays
+    simpleObject, // {"k": "v"}
+    objectOfPrimitiveArrays, // {"k": ["v1","v2"]}
+  ])
+  .describe(
+    "A spreadsheet cell value: primitive (string|number|boolean|null), array of primitives, 2D-array of primitives, or object with primitive/primitive-array values"
+  );
 export const getSpreadsheetTool = tool({
   name: "get_spreadsheet",
   description:
-    "Get complete spreadsheet information including all sheets and their properties.",
+    "Get complete spreadsheet information including all sheets and their properties. Use this to understand the structure of a spreadsheet.",
   parameters: z.object({
-    spreadsheetId: z.string().describe("The spreadsheet ID"),
+    spreadsheetId: z.string().describe("The spreadsheet ID from the URL"),
   }),
   execute: async ({ spreadsheetId }, runContext?: RunContext<Tokens[]>) => {
     try {
@@ -59,12 +111,7 @@ export const getSpreadsheetTool = tool({
         data: result,
       };
     } catch (error: any) {
-      console.error("Error getting spreadsheet:", error);
-      return {
-        success: false,
-        error: error?.message || "Failed to get spreadsheet",
-        details: error?.stack,
-      };
+      return handleApiError(error);
     }
   },
 });
@@ -72,9 +119,9 @@ export const getSpreadsheetTool = tool({
 export const getSpreadsheetMetadataTool = tool({
   name: "get_spreadsheet_metadata",
   description:
-    "Get spreadsheet metadata (title, sheets list) without cell data. Faster than getting full spreadsheet.",
+    "Get spreadsheet metadata (title, sheets list) without cell data. Faster than getting full spreadsheet. Use this when you only need to see what sheets exist.",
   parameters: z.object({
-    spreadsheetId: z.string().describe("The spreadsheet ID"),
+    spreadsheetId: z.string().describe("The spreadsheet ID from the URL"),
   }),
   execute: async ({ spreadsheetId }, runContext?: RunContext<Tokens[]>) => {
     try {
@@ -98,12 +145,7 @@ export const getSpreadsheetMetadataTool = tool({
         data: result,
       };
     } catch (error: any) {
-      console.error("Error getting spreadsheet metadata:", error);
-      return {
-        success: false,
-        error: error?.message || "Failed to get spreadsheet metadata",
-        details: error?.stack,
-      };
+      return handleApiError(error);
     }
   },
 });
@@ -112,24 +154,35 @@ export const getValuesTool = tool({
   name: "get_values",
   description: `
 Get values from a specific range in a spreadsheet.
-Range format: 'Sheet1!A1:D10' or 'Sheet1' for entire sheet.
+
+Range formats:
+- 'Sheet1!A1:D10' - Specific range
+- 'Sheet1!A:A' - Entire column A
+- 'Sheet1!1:1' - Entire row 1
+- 'Sheet1' - Entire sheet
+
 Parameters:
 - spreadsheetId: The spreadsheet ID (required)
-- range: A1 notation range like 'Sheet1!A1:D10' (required)
-- majorDimension: 'ROWS' or 'COLUMNS' (default: 'ROWS')
-- valueRenderOption: 'FORMATTED_VALUE', 'UNFORMATTED_VALUE', or 'FORMULA' (default: 'FORMATTED_VALUE')
+- range: A1 notation range (required)
+- majorDimension: How to organize data (default: 'ROWS')
+  - 'ROWS': Returns [[row1], [row2], ...]
+  - 'COLUMNS': Returns [[col1], [col2], ...]
+- valueRenderOption: How to render values (default: 'FORMATTED_VALUE')
+  - 'FORMATTED_VALUE': Values as they appear in the UI (e.g., "$1,000")
+  - 'UNFORMATTED_VALUE': Raw values (e.g., 1000)
+  - 'FORMULA': Cell formulas (e.g., "=SUM(A1:A10)")
   `,
   parameters: z.object({
-    spreadsheetId: z.string().describe("The spreadsheet ID"),
+    spreadsheetId: z.string().describe("The spreadsheet ID from the URL"),
     range: z.string().describe("A1 notation range (e.g., 'Sheet1!A1:D10')"),
     majorDimension: z
       .enum(["ROWS", "COLUMNS"])
       .default("ROWS")
-      .describe("How to organize the data"),
+      .describe("How to organize the data (default: ROWS)"),
     valueRenderOption: z
       .enum(["FORMATTED_VALUE", "UNFORMATTED_VALUE", "FORMULA"])
       .default("FORMATTED_VALUE")
-      .describe("How to render values"),
+      .describe("How to render values (default: FORMATTED_VALUE)"),
   }),
   execute: async (
     { spreadsheetId, range, majorDimension, valueRenderOption },
@@ -159,14 +212,10 @@ Parameters:
       return {
         success: true,
         data: result,
+        rowCount: result.values?.length || 0,
       };
     } catch (error: any) {
-      console.error("Error getting values:", error);
-      return {
-        success: false,
-        error: error?.message || "Failed to get values",
-        details: error?.stack,
-      };
+      return handleApiError(error);
     }
   },
 });
@@ -174,9 +223,9 @@ Parameters:
 export const batchGetValuesTool = tool({
   name: "batch_get_values",
   description:
-    "Get values from multiple ranges at once. More efficient than multiple individual requests.",
+    "Get values from multiple ranges at once. More efficient than multiple individual requests. Use when you need data from different parts of the spreadsheet.",
   parameters: z.object({
-    spreadsheetId: z.string().describe("The spreadsheet ID"),
+    spreadsheetId: z.string().describe("The spreadsheet ID from the URL"),
     ranges: z
       .array(z.string())
       .describe(
@@ -185,11 +234,11 @@ export const batchGetValuesTool = tool({
     majorDimension: z
       .enum(["ROWS", "COLUMNS"])
       .default("ROWS")
-      .describe("How to organize the data"),
+      .describe("How to organize the data (default: ROWS)"),
     valueRenderOption: z
       .enum(["FORMATTED_VALUE", "UNFORMATTED_VALUE", "FORMULA"])
       .default("FORMATTED_VALUE")
-      .describe("How to render values"),
+      .describe("How to render values (default: FORMATTED_VALUE)"),
   }),
   execute: async (
     { spreadsheetId, ranges, majorDimension, valueRenderOption },
@@ -219,14 +268,10 @@ export const batchGetValuesTool = tool({
       return {
         success: true,
         data: result,
+        rangeCount: result.valueRanges?.length || 0,
       };
     } catch (error: any) {
-      console.error("Error batch getting values:", error);
-      return {
-        success: false,
-        error: error?.message || "Failed to batch get values",
-        details: error?.stack,
-      };
+      return handleApiError(error);
     }
   },
 });
@@ -238,14 +283,22 @@ export const batchGetValuesTool = tool({
 export const updateValuesTool = tool({
   name: "update_values",
   description: `
-Update values in a specific range. Overwrites existing data.
+Update values in a specific range. Overwrites existing data in the range.
+
 Range format: 'Sheet1!A1:D10'
 Values format: 2D array like [['A1', 'B1'], ['A2', 'B2']]
+
+valueInputOption:
+- 'USER_ENTERED' (default): Parses input as if user typed it (formulas, dates, numbers)
+  Example: '=SUM(A1:A10)' becomes a formula, '1/1/2024' becomes a date
+- 'RAW': Stores exactly as provided, no parsing
+  Example: '=SUM(A1:A10)' stored as text string
+
+sanitize: Set to true to prevent formula injection by escaping formulas
   `,
   parameters: z.object({
-    spreadsheetId: z.string().describe("The spreadsheet ID"),
+    spreadsheetId: z.string().describe("The spreadsheet ID from the URL"),
     range: z.string().describe("A1 notation range (e.g., 'Sheet1!A1:D10')"),
-    // Using z.any() here to handle various data types safely without throwing 400
     values: z
       .array(z.array(cellValueSchema))
       .describe("2D array of values to write"),
@@ -255,9 +308,13 @@ Values format: 2D array like [['A1', 'B1'], ['A2', 'B2']]
       .describe(
         "RAW for literal values, USER_ENTERED to parse formulas (default: USER_ENTERED)"
       ),
+    sanitize: z
+      .boolean()
+      .default(false)
+      .describe("Escape formulas to prevent injection (default: false)"),
   }),
   execute: async (
-    { spreadsheetId, range, values, valueInputOption },
+    { spreadsheetId, range, values, valueInputOption, sanitize },
     runContext?: RunContext<Tokens[]>
   ) => {
     try {
@@ -279,6 +336,7 @@ Values format: 2D array like [['A1', 'B1'], ['A2', 'B2']]
         range,
         values,
         valueInputOption,
+        sanitize,
       });
 
       return {
@@ -287,12 +345,7 @@ Values format: 2D array like [['A1', 'B1'], ['A2', 'B2']]
         data: result,
       };
     } catch (error: any) {
-      console.error("Error updating values:", error);
-      return {
-        success: false,
-        error: error?.message || "Failed to update values",
-        details: error?.stack,
-      };
+      return handleApiError(error);
     }
   },
 });
@@ -300,12 +353,22 @@ Values format: 2D array like [['A1', 'B1'], ['A2', 'B2']]
 export const appendValuesTool = tool({
   name: "append_values",
   description: `
-Append rows to the end of a sheet. Automatically finds the last row and appends after it.
-Range format: 'Sheet1!A1' or 'Sheet1' (starting column)
+Append rows to the end of a sheet. Automatically finds the last row with data and appends after it.
+
+Range format: 
+- 'Sheet1!A1' or 'Sheet1' - Starting column for append
+- The API finds the last row automatically
+
 Values format: 2D array like [['A', 'B', 'C'], ['D', 'E', 'F']]
+
+insertDataOption:
+- 'INSERT_ROWS' (default): Insert new rows for the data
+- 'OVERWRITE': Overwrite existing data if present
+
+Note: Empty rows in the middle of data are NOT considered the "last row"
   `,
   parameters: z.object({
-    spreadsheetId: z.string().describe("The spreadsheet ID"),
+    spreadsheetId: z.string().describe("The spreadsheet ID from the URL"),
     range: z
       .string()
       .describe("Starting range (e.g., 'Sheet1!A1' or 'Sheet1')"),
@@ -324,9 +387,20 @@ Values format: 2D array like [['A', 'B', 'C'], ['D', 'E', 'F']]
       .describe(
         "OVERWRITE to replace, INSERT_ROWS to add new rows (default: INSERT_ROWS)"
       ),
+    sanitize: z
+      .boolean()
+      .default(false)
+      .describe("Escape formulas to prevent injection (default: false)"),
   }),
   execute: async (
-    { spreadsheetId, range, values, valueInputOption, insertDataOption },
+    {
+      spreadsheetId,
+      range,
+      values,
+      valueInputOption,
+      insertDataOption,
+      sanitize,
+    },
     runContext?: RunContext<Tokens[]>
   ) => {
     try {
@@ -349,6 +423,7 @@ Values format: 2D array like [['A', 'B', 'C'], ['D', 'E', 'F']]
         values,
         valueInputOption,
         insertDataOption,
+        sanitize,
       });
 
       return {
@@ -357,12 +432,7 @@ Values format: 2D array like [['A', 'B', 'C'], ['D', 'E', 'F']]
         data: result,
       };
     } catch (error: any) {
-      console.error("Error appending values:", error);
-      return {
-        success: false,
-        error: error?.message || "Failed to append values",
-        details: error?.stack,
-      };
+      return handleApiError(error);
     }
   },
 });
@@ -370,26 +440,33 @@ Values format: 2D array like [['A', 'B', 'C'], ['D', 'E', 'F']]
 export const batchUpdateValuesTool = tool({
   name: "batch_update_values",
   description:
-    "Update multiple ranges at once. More efficient than individual updates.",
+    "Update multiple ranges at once. More efficient than individual updates. Limited to 100 ranges per request.",
   parameters: z.object({
-    spreadsheetId: z.string().describe("The spreadsheet ID"),
+    spreadsheetId: z.string().describe("The spreadsheet ID from the URL"),
     data: z
       .array(
         z.object({
-          range: z.string(),
-          values: z.array(z.array(cellValueSchema)),
+          range: z.string().describe("A1 notation range"),
+          values: z
+            .array(z.array(cellValueSchema))
+            .describe("2D array of values"),
         })
       )
-      .describe("Array of range/values pairs"),
+      .max(100)
+      .describe("Array of range/values pairs (max 100)"),
     valueInputOption: z
       .enum(["RAW", "USER_ENTERED"])
       .default("USER_ENTERED")
       .describe(
         "RAW for literal values, USER_ENTERED to parse formulas (default: USER_ENTERED)"
       ),
+    sanitize: z
+      .boolean()
+      .default(false)
+      .describe("Escape formulas to prevent injection (default: false)"),
   }),
   execute: async (
-    { spreadsheetId, data, valueInputOption },
+    { spreadsheetId, data, valueInputOption, sanitize },
     runContext?: RunContext<Tokens[]>
   ) => {
     try {
@@ -410,20 +487,16 @@ export const batchUpdateValuesTool = tool({
         spreadsheetId,
         data,
         valueInputOption,
+        sanitize,
       });
 
       return {
         success: true,
-        message: `Successfully updated ${result.totalUpdatedCells} cells across ${result.totalUpdatedRows} rows`,
+        message: `Successfully updated ${result.totalUpdatedCells} cells across ${result.totalUpdatedRows} rows in ${data.length} ranges`,
         data: result,
       };
     } catch (error: any) {
-      console.error("Error batch updating values:", error);
-      return {
-        success: false,
-        error: error?.message || "Failed to batch update values",
-        details: error?.stack,
-      };
+      return handleApiError(error);
     }
   },
 });
@@ -431,9 +504,9 @@ export const batchUpdateValuesTool = tool({
 export const clearValuesTool = tool({
   name: "clear_values",
   description:
-    "Clear values from a range. Keeps formatting but removes all data.",
+    "Clear values from a range. Keeps formatting and structure but removes all data. Cannot be undone.",
   parameters: z.object({
-    spreadsheetId: z.string().describe("The spreadsheet ID"),
+    spreadsheetId: z.string().describe("The spreadsheet ID from the URL"),
     range: z
       .string()
       .describe("A1 notation range to clear (e.g., 'Sheet1!A1:D10')"),
@@ -467,21 +540,17 @@ export const clearValuesTool = tool({
         data: result,
       };
     } catch (error: any) {
-      console.error("Error clearing values:", error);
-      return {
-        success: false,
-        error: error?.message || "Failed to clear values",
-        details: error?.stack,
-      };
+      return handleApiError(error);
     }
   },
 });
 
 export const batchClearValuesTool = tool({
   name: "batch_clear_values",
-  description: "Clear values from multiple ranges at once.",
+  description:
+    "Clear values from multiple ranges at once. More efficient than individual clear operations.",
   parameters: z.object({
-    spreadsheetId: z.string().describe("The spreadsheet ID"),
+    spreadsheetId: z.string().describe("The spreadsheet ID from the URL"),
     ranges: z
       .array(z.string())
       .describe("Array of A1 notation ranges to clear"),
@@ -515,12 +584,7 @@ export const batchClearValuesTool = tool({
         data: result,
       };
     } catch (error: any) {
-      console.error("Error batch clearing values:", error);
-      return {
-        success: false,
-        error: error?.message || "Failed to batch clear values",
-        details: error?.stack,
-      };
+      return handleApiError(error);
     }
   },
 });
@@ -534,15 +598,23 @@ export const createSpreadsheetTool = tool({
   description: `
 Create a new spreadsheet with optional sheets configuration.
 Returns the spreadsheet ID and URL.
+
+If no sheets are specified, a default "Sheet1" is created automatically.
   `,
   parameters: z.object({
     title: z.string().describe("Title of the new spreadsheet"),
     sheets: z
       .array(
         z.object({
-          title: z.string(),
-          rowCount: z.number().default(1000),
-          columnCount: z.number().default(26),
+          title: z.string().describe("Sheet name/title"),
+          rowCount: z
+            .number()
+            .default(1000)
+            .describe("Number of rows (default: 1000)"),
+          columnCount: z
+            .number()
+            .default(26)
+            .describe("Number of columns (default: 26)"),
         })
       )
       .default([])
@@ -587,21 +659,17 @@ Returns the spreadsheet ID and URL.
         },
       };
     } catch (error: any) {
-      console.error("Error creating spreadsheet:", error);
-      return {
-        success: false,
-        error: error?.message || "Failed to create spreadsheet",
-        details: error?.stack,
-      };
+      return handleApiError(error);
     }
   },
 });
 
 export const addSheetTool = tool({
   name: "add_sheet",
-  description: "Add a new sheet (tab) to an existing spreadsheet.",
+  description:
+    "Add a new sheet (tab) to an existing spreadsheet. Index 0 means first position.",
   parameters: z.object({
-    spreadsheetId: z.string().describe("The spreadsheet ID"),
+    spreadsheetId: z.string().describe("The spreadsheet ID from the URL"),
     title: z.string().describe("Title of the new sheet"),
     rowCount: z
       .number()
@@ -611,7 +679,10 @@ export const addSheetTool = tool({
       .number()
       .default(26)
       .describe("Number of columns (default: 26)"),
-    index: z.number().default(0).describe("Position index (0-based)"),
+    index: z
+      .number()
+      .default(0)
+      .describe("Position index, 0-based (default: 0)"),
   }),
   execute: async (
     { spreadsheetId, title, rowCount, columnCount, index },
@@ -645,12 +716,7 @@ export const addSheetTool = tool({
         data: result,
       };
     } catch (error: any) {
-      console.error("Error adding sheet:", error);
-      return {
-        success: false,
-        error: error?.message || "Failed to add sheet",
-        details: error?.stack,
-      };
+      return handleApiError(error);
     }
   },
 });
@@ -658,11 +724,15 @@ export const addSheetTool = tool({
 export const deleteSheetTool = tool({
   name: "delete_sheet",
   description:
-    "Delete a sheet (tab) from a spreadsheet. This action cannot be undone.",
+    "Delete a sheet (tab) from a spreadsheet. This action cannot be undone. Note: Use sheetId (numeric), not sheet title.",
   needsApproval: true,
   parameters: z.object({
-    spreadsheetId: z.string().describe("The spreadsheet ID"),
-    sheetId: z.number().describe("The sheet ID (not the title)"),
+    spreadsheetId: z.string().describe("The spreadsheet ID from the URL"),
+    sheetId: z
+      .number()
+      .describe(
+        "The numeric sheet ID (not the title). Get this from get_spreadsheet or get_spreadsheet_metadata"
+      ),
   }),
   execute: async (
     { spreadsheetId, sheetId },
@@ -689,12 +759,7 @@ export const deleteSheetTool = tool({
         message: "Sheet deleted successfully",
       };
     } catch (error: any) {
-      console.error("Error deleting sheet:", error);
-      return {
-        success: false,
-        error: error?.message || "Failed to delete sheet",
-        details: error?.stack,
-      };
+      return handleApiError(error);
     }
   },
 });
@@ -702,18 +767,20 @@ export const deleteSheetTool = tool({
 export const duplicateSheetTool = tool({
   name: "duplicate_sheet",
   description:
-    "Create a copy of an existing sheet within the same spreadsheet.",
+    "Create a copy of an existing sheet within the same spreadsheet. All data and formatting is copied.",
   parameters: z.object({
-    spreadsheetId: z.string().describe("The spreadsheet ID"),
-    sourceSheetId: z.number().describe("The sheet ID to duplicate"),
+    spreadsheetId: z.string().describe("The spreadsheet ID from the URL"),
+    sourceSheetId: z.number().describe("The numeric sheet ID to duplicate"),
     newSheetName: z
       .string()
       .default("")
-      .describe("Name for the duplicated sheet"),
+      .describe(
+        "Name for the duplicated sheet (optional, auto-generated if not provided)"
+      ),
     insertSheetIndex: z
       .number()
       .default(0)
-      .describe("Position for the new sheet"),
+      .describe("Position for the new sheet (default: 0)"),
   }),
   execute: async (
     { spreadsheetId, sourceSheetId, newSheetName, insertSheetIndex },
@@ -748,12 +815,7 @@ export const duplicateSheetTool = tool({
         data: result,
       };
     } catch (error: any) {
-      console.error("Error duplicating sheet:", error);
-      return {
-        success: false,
-        error: error?.message || "Failed to duplicate sheet",
-        details: error?.stack,
-      };
+      return handleApiError(error);
     }
   },
 });
@@ -762,8 +824,8 @@ export const renameSheetTool = tool({
   name: "rename_sheet",
   description: "Rename an existing sheet (tab) in a spreadsheet.",
   parameters: z.object({
-    spreadsheetId: z.string().describe("The spreadsheet ID"),
-    sheetId: z.number().describe("The sheet ID to rename"),
+    spreadsheetId: z.string().describe("The spreadsheet ID from the URL"),
+    sheetId: z.number().describe("The numeric sheet ID to rename"),
     newTitle: z.string().describe("New name for the sheet"),
   }),
   execute: async (
@@ -791,12 +853,7 @@ export const renameSheetTool = tool({
         message: `Successfully renamed sheet to '${newTitle}'`,
       };
     } catch (error: any) {
-      console.error("Error renaming sheet:", error);
-      return {
-        success: false,
-        error: error?.message || "Failed to rename sheet",
-        details: error?.stack,
-      };
+      return handleApiError(error);
     }
   },
 });
@@ -807,12 +864,13 @@ export const renameSheetTool = tool({
 
 export const insertRowsTool = tool({
   name: "insert_rows",
-  description: "Insert empty rows into a sheet.",
+  description:
+    "Insert empty rows into a sheet. Indices are 0-based (row 1 = index 0).",
   parameters: z.object({
-    spreadsheetId: z.string().describe("The spreadsheet ID"),
-    sheetId: z.number().describe("The sheet ID"),
-    startIndex: z.number().describe("Starting row index (0-based)"),
-    endIndex: z.number().describe("Ending row index (exclusive)"),
+    spreadsheetId: z.string().describe("The spreadsheet ID from the URL"),
+    sheetId: z.number().describe("The numeric sheet ID"),
+    startIndex: z.number().describe("Starting row index (0-based, inclusive)"),
+    endIndex: z.number().describe("Ending row index (0-based, exclusive)"),
   }),
   execute: async (
     { spreadsheetId, sheetId, startIndex, endIndex },
@@ -846,24 +904,22 @@ export const insertRowsTool = tool({
         } rows at index ${startIndex}`,
       };
     } catch (error: any) {
-      console.error("Error inserting rows:", error);
-      return {
-        success: false,
-        error: error?.message || "Failed to insert rows",
-        details: error?.stack,
-      };
+      return handleApiError(error);
     }
   },
 });
 
 export const insertColumnsTool = tool({
   name: "insert_columns",
-  description: "Insert empty columns into a sheet.",
+  description:
+    "Insert empty columns into a sheet. Indices are 0-based (column A = index 0).",
   parameters: z.object({
-    spreadsheetId: z.string().describe("The spreadsheet ID"),
-    sheetId: z.number().describe("The sheet ID"),
-    startIndex: z.number().describe("Starting column index (0-based)"),
-    endIndex: z.number().describe("Ending column index (exclusive)"),
+    spreadsheetId: z.string().describe("The spreadsheet ID from the URL"),
+    sheetId: z.number().describe("The numeric sheet ID"),
+    startIndex: z
+      .number()
+      .describe("Starting column index (0-based, inclusive)"),
+    endIndex: z.number().describe("Ending column index (0-based, exclusive)"),
   }),
   execute: async (
     { spreadsheetId, sheetId, startIndex, endIndex },
@@ -897,25 +953,21 @@ export const insertColumnsTool = tool({
         } columns at index ${startIndex}`,
       };
     } catch (error: any) {
-      console.error("Error inserting columns:", error);
-      return {
-        success: false,
-        error: error?.message || "Failed to insert columns",
-        details: error?.stack,
-      };
+      return handleApiError(error);
     }
   },
 });
 
 export const deleteRowsTool = tool({
   name: "delete_rows",
-  description: "Delete rows from a sheet. This action cannot be undone.",
+  description:
+    "Delete rows from a sheet. This action cannot be undone. Indices are 0-based.",
   needsApproval: true,
   parameters: z.object({
-    spreadsheetId: z.string().describe("The spreadsheet ID"),
-    sheetId: z.number().describe("The sheet ID"),
-    startIndex: z.number().describe("Starting row index (0-based)"),
-    endIndex: z.number().describe("Ending row index (exclusive)"),
+    spreadsheetId: z.string().describe("The spreadsheet ID from the URL"),
+    sheetId: z.number().describe("The numeric sheet ID"),
+    startIndex: z.number().describe("Starting row index (0-based, inclusive)"),
+    endIndex: z.number().describe("Ending row index (0-based, exclusive)"),
   }),
   execute: async (
     { spreadsheetId, sheetId, startIndex, endIndex },
@@ -949,25 +1001,23 @@ export const deleteRowsTool = tool({
         } rows from index ${startIndex}`,
       };
     } catch (error: any) {
-      console.error("Error deleting rows:", error);
-      return {
-        success: false,
-        error: error?.message || "Failed to delete rows",
-        details: error?.stack,
-      };
+      return handleApiError(error);
     }
   },
 });
 
 export const deleteColumnsTool = tool({
   name: "delete_columns",
-  description: "Delete columns from a sheet. This action cannot be undone.",
+  description:
+    "Delete columns from a sheet. This action cannot be undone. Indices are 0-based.",
   needsApproval: true,
   parameters: z.object({
-    spreadsheetId: z.string().describe("The spreadsheet ID"),
-    sheetId: z.number().describe("The sheet ID"),
-    startIndex: z.number().describe("Starting column index (0-based)"),
-    endIndex: z.number().describe("Ending column index (exclusive)"),
+    spreadsheetId: z.string().describe("The spreadsheet ID from the URL"),
+    sheetId: z.number().describe("The numeric sheet ID"),
+    startIndex: z
+      .number()
+      .describe("Starting column index (0-based, inclusive)"),
+    endIndex: z.number().describe("Ending column index (0-based, exclusive)"),
   }),
   execute: async (
     { spreadsheetId, sheetId, startIndex, endIndex },
@@ -1001,12 +1051,7 @@ export const deleteColumnsTool = tool({
         } columns from index ${startIndex}`,
       };
     } catch (error: any) {
-      console.error("Error deleting columns:", error);
-      return {
-        success: false,
-        error: error?.message || "Failed to delete columns",
-        details: error?.stack,
-      };
+      return handleApiError(error);
     }
   },
 });
@@ -1017,20 +1062,51 @@ export const deleteColumnsTool = tool({
 
 export const formatCellsTool = tool({
   name: "format_cells",
-  description:
-    "Apply formatting to a range of cells (colors, text style, alignment).",
+  description: `
+Apply formatting to a range of cells (colors, text style, alignment, number format).
+
+Color values: RGB from 0 to 1 (not 0-255). Example: red=1, green=0, blue=0 for pure red.
+Alpha channel: Optional transparency from 0 (transparent) to 1 (opaque).
+
+Number format types:
+- 'NUMBER': General numbers
+- 'CURRENCY': Currency format
+- 'PERCENT': Percentage
+- 'DATE': Date format
+- 'TIME': Time format
+- 'DATE_TIME': Combined date and time
+- 'SCIENTIFIC': Scientific notation
+
+Pattern examples:
+- "$#,##0.00" - Currency with 2 decimals
+- "0.00%" - Percentage with 2 decimals
+- "mm/dd/yyyy" - Date format
+- "h:mm:ss AM/PM" - Time format
+  `,
   parameters: z.object({
-    spreadsheetId: z.string().describe("The spreadsheet ID"),
-    sheetId: z.number().describe("The sheet ID"),
-    startRowIndex: z.number().describe("Starting row index (0-based)"),
-    endRowIndex: z.number().describe("Ending row index (exclusive)"),
-    startColumnIndex: z.number().describe("Starting column index (0-based)"),
-    endColumnIndex: z.number().describe("Ending column index (exclusive)"),
+    spreadsheetId: z.string().describe("The spreadsheet ID from the URL"),
+    sheetId: z.number().describe("The numeric sheet ID"),
+    startRowIndex: z
+      .number()
+      .describe("Starting row index (0-based, inclusive)"),
+    endRowIndex: z.number().describe("Ending row index (0-based, exclusive)"),
+    startColumnIndex: z
+      .number()
+      .describe("Starting column index (0-based, inclusive)"),
+    endColumnIndex: z
+      .number()
+      .describe("Ending column index (0-based, exclusive)"),
     backgroundColor: z
       .object({
-        red: z.number().min(0).max(1),
-        green: z.number().min(0).max(1),
-        blue: z.number().min(0).max(1),
+        red: z.number().min(0).max(1).describe("Red 0-1"),
+        green: z.number().min(0).max(1).describe("Green 0-1"),
+        blue: z.number().min(0).max(1).describe("Blue 0-1"),
+        alpha: z
+          .number()
+          .min(0)
+          .max(1)
+          .optional()
+          .describe("Alpha/transparency 0-1"),
       })
       .optional()
       .describe("Background color (RGB values 0-1)"),
@@ -1039,9 +1115,15 @@ export const formatCellsTool = tool({
     fontSize: z.number().optional().describe("Font size in points"),
     textColor: z
       .object({
-        red: z.number().min(0).max(1),
-        green: z.number().min(0).max(1),
-        blue: z.number().min(0).max(1),
+        red: z.number().min(0).max(1).describe("Red 0-1"),
+        green: z.number().min(0).max(1).describe("Green 0-1"),
+        blue: z.number().min(0).max(1).describe("Blue 0-1"),
+        alpha: z
+          .number()
+          .min(0)
+          .max(1)
+          .optional()
+          .describe("Alpha/transparency 0-1"),
       })
       .optional()
       .describe("Text color (RGB values 0-1)"),
@@ -1053,6 +1135,16 @@ export const formatCellsTool = tool({
       .enum(["TOP", "MIDDLE", "BOTTOM"])
       .optional()
       .describe("Vertical alignment"),
+    numberFormatType: z
+      .string()
+      .optional()
+      .describe(
+        "Number format type (e.g., 'NUMBER', 'CURRENCY', 'DATE', 'PERCENT')"
+      ),
+    numberFormatPattern: z
+      .string()
+      .optional()
+      .describe("Number format pattern (e.g., '$#,##0.00', 'mm/dd/yyyy')"),
   }),
   execute: async (
     {
@@ -1069,6 +1161,8 @@ export const formatCellsTool = tool({
       textColor,
       horizontalAlignment,
       verticalAlignment,
+      numberFormatType,
+      numberFormatPattern,
     },
     runContext?: RunContext<Tokens[]>
   ) => {
@@ -1114,6 +1208,13 @@ export const formatCellsTool = tool({
         format.verticalAlignment = verticalAlignment;
       }
 
+      if (numberFormatType || numberFormatPattern) {
+        format.numberFormat = {};
+        if (numberFormatType) format.numberFormat.type = numberFormatType;
+        if (numberFormatPattern)
+          format.numberFormat.pattern = numberFormatPattern;
+      }
+
       await sheets.formatCells({
         spreadsheetId,
         sheetId,
@@ -1129,12 +1230,7 @@ export const formatCellsTool = tool({
         message: `Successfully formatted cells from row ${startRowIndex} to ${endRowIndex}, column ${startColumnIndex} to ${endColumnIndex}`,
       };
     } catch (error: any) {
-      console.error("Error formatting cells:", error);
-      return {
-        success: false,
-        error: error?.message || "Failed to format cells",
-        details: error?.stack,
-      };
+      return handleApiError(error);
     }
   },
 });
@@ -1145,13 +1241,15 @@ export const formatCellsTool = tool({
 
 export const findRowByValueTool = tool({
   name: "find_row_by_value",
-  description: "Find the row index of a specific value in a column.",
+  description:
+    "Find the row index (0-based) of a specific value in a column. Returns null if not found.",
   parameters: z.object({
-    spreadsheetId: z.string().describe("The spreadsheet ID"),
+    spreadsheetId: z.string().describe("The spreadsheet ID from the URL"),
     range: z.string().describe("Range to search (e.g., 'Sheet1!A1:Z100')"),
-    columnIndex: z.number().describe("Column index to search (0-based)"),
-    // Fixed: Using cellValueSchema instead of z.any() directly for consistency
-    value: cellValueSchema,
+    columnIndex: z
+      .number()
+      .describe("Column index to search (0-based, A=0, B=1, etc.)"),
+    value: cellValueSchema.describe("Value to search for"),
   }),
   execute: async (
     { spreadsheetId, range, columnIndex, value },
@@ -1182,32 +1280,30 @@ export const findRowByValueTool = tool({
         return {
           success: true,
           message: `Value '${value}' not found in column ${columnIndex}`,
-          data: { rowIndex: null },
+          data: { rowIndex: null, found: false },
         };
       }
 
       return {
         success: true,
         message: `Found value '${value}' at row index ${rowIndex}`,
-        data: { rowIndex },
+        data: { rowIndex, found: true },
       };
     } catch (error: any) {
-      console.error("Error finding row:", error);
-      return {
-        success: false,
-        error: error?.message || "Failed to find row",
-        details: error?.stack,
-      };
+      return handleApiError(error);
     }
   },
 });
 
 export const getLastRowIndexTool = tool({
   name: "get_last_row_index",
-  description: "Get the index of the last non-empty row in a range.",
+  description:
+    "Get the index (0-based) of the last non-empty row in a range. Useful for finding where to append data.",
   parameters: z.object({
-    spreadsheetId: z.string().describe("The spreadsheet ID"),
-    range: z.string().describe("Range to check (e.g., 'Sheet1!A:A')"),
+    spreadsheetId: z.string().describe("The spreadsheet ID from the URL"),
+    range: z
+      .string()
+      .describe("Range to check (e.g., 'Sheet1!A:A' for entire column A)"),
   }),
   execute: async (
     { spreadsheetId, range },
@@ -1235,21 +1331,17 @@ export const getLastRowIndexTool = tool({
         data: { lastRowIndex },
       };
     } catch (error: any) {
-      console.error("Error getting last row index:", error);
-      return {
-        success: false,
-        error: error?.message || "Failed to get last row index",
-        details: error?.stack,
-      };
+      return handleApiError(error);
     }
   },
 });
 
 export const getSheetByNameTool = tool({
   name: "get_sheet_by_name",
-  description: "Get sheet information by sheet name/title.",
+  description:
+    "Get sheet information (including sheetId) by sheet name/title. Use this to get the sheetId needed for other operations.",
   parameters: z.object({
-    spreadsheetId: z.string().describe("The spreadsheet ID"),
+    spreadsheetId: z.string().describe("The spreadsheet ID from the URL"),
     sheetName: z.string().describe("Name of the sheet to find"),
   }),
   execute: async (
@@ -1278,96 +1370,7 @@ export const getSheetByNameTool = tool({
         data: sheet,
       };
     } catch (error: any) {
-      console.error("Error getting sheet by name:", error);
-      return {
-        success: false,
-        error: error?.message || "Failed to get sheet by name",
-        details: error?.stack,
-      };
+      return handleApiError(error);
     }
   },
 });
-
-// ------------------------------------------------------------------
-// Agent Definition
-// ------------------------------------------------------------------
-
-export const sheetsAgent = new Agent({
-  name: "sheets-agent",
-  instructions: `${RECOMMENDED_PROMPT_PREFIX}
-You are the Google Sheets agent for reading and writing spreadsheet data.
-
-CAPABILITIES:
-
-Reading Operations:
-- Get spreadsheet information and metadata
-- Read values from single or multiple ranges
-- Search for specific values in sheets
-- Find row indices and last row positions
-- Get sheet information by name
-
-Writing Operations:
-- Update cell values in existing ranges
-- Append new rows to sheets
-- Batch update multiple ranges at once
-- Clear values from ranges (preserves formatting)
-- Handle both RAW and USER_ENTERED input modes
-
-WORKFLOW BEST PRACTICES:
-
-1. For view-then-modify requests:
-   - First read/search to show current data
-   - Present results to user
-   - Then perform the requested modifications
-
-2. Before large operations:
-   - For CLEAR operations affecting >50 cells: Ask for confirmation
-   - Present clear summary of what will be modified
-
-3. After major changes:
-   - Offer to read back the data for verification
-   - Provide a clear summary of what was changed
-
-INPUT MODES:
-- USER_ENTERED: Parse formulas, dates, numbers (default, recommended)
-- RAW: Store values exactly as provided (use for pre-formatted data)
-
-IMPORTANT NOTES:
-- Always use clear ranges in A1 notation (e.g., 'Sheet1!A1:D10')
-- Use batch operations when working with multiple ranges for efficiency
-- Present clear summaries before and after operations
-- Clearing removes DATA only, not formatting or structure
-  `,
-  tools: [
-    // Reading tools
-    getSpreadsheetTool,
-    getSpreadsheetMetadataTool,
-    getValuesTool,
-    batchGetValuesTool,
-    findRowByValueTool,
-    getLastRowIndexTool,
-    getSheetByNameTool,
-    // Writing tools
-    updateValuesTool,
-    appendValuesTool,
-    batchUpdateValuesTool,
-    // Clearing tools
-    clearValuesTool,
-    batchClearValuesTool,
-    // Management tools
-    createSpreadsheetTool,
-    addSheetTool,
-    deleteSheetTool,
-    duplicateSheetTool,
-    renameSheetTool,
-    // Row/Column operations
-    insertRowsTool,
-    insertColumnsTool,
-    deleteRowsTool,
-    deleteColumnsTool,
-    // Formatting
-    formatCellsTool,
-  ],
-});
-
-export default sheetsAgent;

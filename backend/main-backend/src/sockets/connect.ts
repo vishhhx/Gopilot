@@ -37,14 +37,12 @@ const SocketIo = async (httpServer: http.Server) => {
     }
     next();
   });
-
   const redisservice = new RedisService();
-
   io.on("connection", async (socket: Socket) => {
     const user = socket.data.user;
     if (user) {
       console.log(`connected: ${user.userId}`);
-      await redisservice.setUser(user.userId, socket.id);
+      await redisservice.addUserSocket(user.userId, socket.id);
     } else {
       console.log("container connected", socket.id);
     }
@@ -52,7 +50,7 @@ const SocketIo = async (httpServer: http.Server) => {
     socket.on("disconnect", async (reason) => {
       if (user) {
         console.log(`disconnected: ${user.userId} - ${reason}`);
-        await redisservice.removeUser(user.userId, socket.id);
+        await redisservice.addUserSocket(user.userId, socket.id);
       } else {
         console.log(`container disconnected: ${socket.id} - ${reason}`);
       }

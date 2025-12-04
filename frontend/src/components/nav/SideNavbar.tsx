@@ -318,7 +318,7 @@ const navItems: NavItemData[] = [
     href: "/chats",
   },
   {
-    name: "Connect",
+    name: "workflow",
     icon: () => (
       <svg
         xmlns="http://www.w3.org/2000/svg"
@@ -327,16 +327,16 @@ const navItems: NavItemData[] = [
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
       >
-        <path stroke="none" d="M0 0h24v24H0z" fill="none" />
-        <path d="M10 14a3.5 3.5 0 0 0 5 0l4 -4a3.5 3.5 0 0 0 -5 -5l-.5 .5" />
-        <path d="M14 10a3.5 3.5 0 0 0 -5 0l-4 4a3.5 3.5 0 0 0 5 5l.5 -.5" />
+        <rect width="8" height="8" x="3" y="3" rx="2" />
+        <path d="M7 11v4a2 2 0 0 0 2 2h4" />
+        <rect width="8" height="8" x="13" y="13" rx="2" />
       </svg>
     ),
-    href: "/connect",
+    href: "/Workflow",
   },
 ];
 

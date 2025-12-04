@@ -1,7 +1,31 @@
+version: "3.8"
+
 services:
   redis-stack:
     image: redis/redis-stack:latest
     container_name: redis
     ports:
-      - "6379:6379"
-      - "8001:8001"
+      - "6379:6379"   
+      - "8001:8001"   
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:3.11-management-alpine
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"    
+      - "15672:15672"   
+    environment:
+      RABBITMQ_DEFAULT_USER: rabbituser
+      RABBITMQ_DEFAULT_PASS: rabbitpassword
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+      - rabbitmq-logs:/var/log/rabbitmq
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+  rabbitmq-data:
+  rabbitmq-logs:

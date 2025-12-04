@@ -53,6 +53,25 @@ export class SheetsService {
     return column;
   }
 
+  private validateA1Notation(range: string): boolean {
+    // Basic A1 notation validation
+    const a1Pattern = /^[^!]+![A-Z]+\d+:[A-Z]+\d+$|^[^!]+![A-Z]+:[A-Z]+$|^[^!]+!\d+:\d+$|^[^!]+!$|^[^!]+$/;
+    return a1Pattern.test(range);
+  }
+
+  private sanitizeValue(value: any): any {
+    // Prevent formula injection
+    if (typeof value === 'string' && (value.startsWith('=') || value.startsWith('+') || value.startsWith('-') || value.startsWith('@'))) {
+      return `'${value}`; // Escape with single quote
+    }
+    return value;
+  }
+
+  private sanitizeValues(values: any[][], enableSanitization: boolean = false): any[][] {
+    if (!enableSanitization) return values;
+    return values.map(row => row.map(cell => this.sanitizeValue(cell)));
+  }
+
   // Read Operations
   async getSpreadsheet(spreadsheetId: string) {
     const response = await this.sheets.spreadsheets.get({
@@ -78,6 +97,10 @@ export class SheetsService {
     valueRenderOption?: "FORMATTED_VALUE" | "UNFORMATTED_VALUE" | "FORMULA";
     dateTimeRenderOption?: "SERIAL_NUMBER" | "FORMATTED_STRING";
   }) {
+    if (!this.validateA1Notation(options.range)) {
+      throw new Error(`Invalid A1 notation: ${options.range}`);
+    }
+
     const response = await this.sheets.spreadsheets.values.get({
       spreadsheetId: options.spreadsheetId,
       range: options.range,
@@ -96,6 +119,13 @@ export class SheetsService {
     valueRenderOption?: "FORMATTED_VALUE" | "UNFORMATTED_VALUE" | "FORMULA";
     dateTimeRenderOption?: "SERIAL_NUMBER" | "FORMATTED_STRING";
   }) {
+    // Validate all ranges
+    for (const range of options.ranges) {
+      if (!this.validateA1Notation(range)) {
+        throw new Error(`Invalid A1 notation: ${range}`);
+      }
+    }
+
     const response = await this.sheets.spreadsheets.values.batchGet({
       spreadsheetId: options.spreadsheetId,
       ranges: options.ranges,
@@ -126,13 +156,20 @@ export class SheetsService {
     range: string;
     values: any[][];
     valueInputOption?: "RAW" | "USER_ENTERED";
+    sanitize?: boolean;
   }) {
+    if (!this.validateA1Notation(options.range)) {
+      throw new Error(`Invalid A1 notation: ${options.range}`);
+    }
+
+    const sanitizedValues = this.sanitizeValues(options.values, options.sanitize);
+
     const response = await this.sheets.spreadsheets.values.update({
       spreadsheetId: options.spreadsheetId,
       range: options.range,
       valueInputOption: options.valueInputOption || "USER_ENTERED",
       requestBody: {
-        values: options.values,
+        values: sanitizedValues,
       },
     });
 
@@ -145,14 +182,21 @@ export class SheetsService {
     values: any[][];
     valueInputOption?: "RAW" | "USER_ENTERED";
     insertDataOption?: "OVERWRITE" | "INSERT_ROWS";
+    sanitize?: boolean;
   }) {
+    if (!this.validateA1Notation(options.range)) {
+      throw new Error(`Invalid A1 notation: ${options.range}`);
+    }
+
+    const sanitizedValues = this.sanitizeValues(options.values, options.sanitize);
+
     const response = await this.sheets.spreadsheets.values.append({
       spreadsheetId: options.spreadsheetId,
       range: options.range,
       valueInputOption: options.valueInputOption || "USER_ENTERED",
       insertDataOption: options.insertDataOption || "INSERT_ROWS",
       requestBody: {
-        values: options.values,
+        values: sanitizedValues,
       },
     });
 
@@ -166,12 +210,30 @@ export class SheetsService {
       values: any[][];
     }>;
     valueInputOption?: "RAW" | "USER_ENTERED";
+    sanitize?: boolean;
   }) {
+    // Validate batch size limit
+    if (options.data.length > 100) {
+      throw new Error("Batch update limited to 100 ranges per request");
+    }
+
+    // Validate all ranges
+    for (const item of options.data) {
+      if (!this.validateA1Notation(item.range)) {
+        throw new Error(`Invalid A1 notation: ${item.range}`);
+      }
+    }
+
+    const sanitizedData = options.data.map(item => ({
+      range: item.range,
+      values: this.sanitizeValues(item.values, options.sanitize)
+    }));
+
     const response = await this.sheets.spreadsheets.values.batchUpdate({
       spreadsheetId: options.spreadsheetId,
       requestBody: {
         valueInputOption: options.valueInputOption || "USER_ENTERED",
-        data: options.data,
+        data: sanitizedData,
       },
     });
 
@@ -179,15 +241,27 @@ export class SheetsService {
   }
 
   async clearValues(options: { spreadsheetId: string; range: string }) {
+    if (!this.validateA1Notation(options.range)) {
+      throw new Error(`Invalid A1 notation: ${options.range}`);
+    }
+
     const response = await this.sheets.spreadsheets.values.clear({
       spreadsheetId: options.spreadsheetId,
       range: options.range,
+      requestBody: {}, // Required by API
     });
 
     return response.data;
   }
 
   async batchClearValues(options: { spreadsheetId: string; ranges: string[] }) {
+    // Validate all ranges
+    for (const range of options.ranges) {
+      if (!this.validateA1Notation(range)) {
+        throw new Error(`Invalid A1 notation: ${range}`);
+      }
+    }
+
     const response = await this.sheets.spreadsheets.values.batchClear({
       spreadsheetId: options.spreadsheetId,
       requestBody: {
@@ -438,15 +512,19 @@ export class SheetsService {
     startColumnIndex: number;
     endColumnIndex: number;
     format: {
-      backgroundColor?: { red: number; green: number; blue: number };
+      backgroundColor?: { red: number; green: number; blue: number; alpha?: number };
       textFormat?: {
         bold?: boolean;
         italic?: boolean;
         fontSize?: number;
-        foregroundColor?: { red: number; green: number; blue: number };
+        foregroundColor?: { red: number; green: number; blue: number; alpha?: number };
       };
       horizontalAlignment?: "LEFT" | "CENTER" | "RIGHT";
       verticalAlignment?: "TOP" | "MIDDLE" | "BOTTOM";
+      numberFormat?: {
+        type: string;
+        pattern?: string;
+      };
     };
   }) {
     const response = await this.sheets.spreadsheets.batchUpdate({
@@ -465,7 +543,7 @@ export class SheetsService {
               cell: {
                 userEnteredFormat: options.format,
               },
-              fields: "userEnteredFormat",
+              fields: "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment,numberFormat)",
             },
           },
         ],

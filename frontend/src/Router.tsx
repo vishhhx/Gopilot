@@ -14,6 +14,8 @@ import SettingLayout from "./pages/private/setting/SettingLayout";
 import IntegrationPage from "./pages/private/setting/IntegrationsPage";
 import New from "./pages/private/automate/New";
 import SessionChat from "./pages/private/automate/SessionChat";
+import WorkFlow from "./pages/private/automate/WorkFlow";
+import Flow from "./pages/private/automate/Flow";
 
 const router = createBrowserRouter(
   createRoutesFromElements(
@@ -30,6 +32,8 @@ const router = createBrowserRouter(
           <Route path="/settings" element={<SettingLayout />}>
             <Route path="integrations" element={<IntegrationPage />} />
           </Route>
+          <Route path="/workflow" element={<WorkFlow />} />
+          <Route path="/workflow/:id" element={<Flow />} />
         </Route>
       </Route>
     </>

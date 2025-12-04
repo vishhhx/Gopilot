@@ -34,28 +34,34 @@ export class RedisService {
       await this.client.del(`refreshToken:${userId}`);
       await this.client.set(`refreshToken:${userId}`, refreshToken);
     } catch (error) {
-      throw new Error(`Error setting refresh token for user ${userId}: ${error}`);
+      throw new Error(
+        `Error setting refresh token for user ${userId}: ${error}`
+      );
     }
   }
   async getRefreshToken(userId: string): Promise<string | null> {
     try {
       return await this.client.get(`refreshToken:${userId}`);
     } catch (error) {
-      throw new Error(`Error getting refresh token for user ${userId}: ${error}`);
+      throw new Error(
+        `Error getting refresh token for user ${userId}: ${error}`
+      );
     }
   }
   private defaultExpiration = 5000;
 
-  async setUserDetails(userId: string, data: UserDetails, expirationSeconds = this.defaultExpiration) {
+  async setUserDetails(
+    userId: string,
+    data: UserDetails,
+    expirationSeconds = this.defaultExpiration
+  ) {
     try {
-      await this.client.set(
-        `userDetails:${userId}`,
-        JSON.stringify(data),
-        { expiration:{
-          type:"EX",
-          value:this.defaultExpiration
-        }}
-      );
+      await this.client.set(`userDetails:${userId}`, JSON.stringify(data), {
+        expiration: {
+          type: "EX",
+          value: this.defaultExpiration,
+        },
+      });
     } catch (error) {
       throw new Error(`Error setting user details for ${userId}: ${error}`);
     }
@@ -80,6 +86,31 @@ export class RedisService {
       return userDetails;
     } catch (error) {
       throw new Error(`Error getting user details for ${userId}: ${error}`);
+    }
+  }
+
+  async addInterrupt(id: string, interrupt: string) {
+    try {
+      await this.client.set(`interrupt:${id}`, JSON.stringify(interrupt), {
+        expiration: {
+          type: "EX",
+          value: this.defaultExpiration,
+        },
+      });
+    } catch (error) {
+      throw new Error(`Error setting interrupt for ${id}: ${error}`);
+    }
+  }
+
+  async getInterrupt(id: string): Promise<string | null> {
+    try {
+      const cached = await this.client.get(`interrupt:${id}`);
+      if (cached) {
+        return JSON.parse(cached);
+      }
+      return null;
+    } catch (error) {
+      throw new Error(`Error getting interrupt for ${id}: ${error}`);
     }
   }
 }

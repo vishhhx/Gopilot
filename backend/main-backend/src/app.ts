@@ -9,7 +9,9 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { Agentrouter } from "./routes/agent";
 import { SesstionRouter } from "./routes/sesstion";
-import testrouter from "./test.routes"
+import testrouter from "./test.routes";
+import workflowRouter from "./routes/workflow";
+import { otherRouter } from "./routes/other";
 const app: Application = express();
 const httpServer = createServer(app);
 
@@ -28,8 +30,9 @@ app.get("/api/v1/health", (req, res) => {
 });
 app.use("/api/v1/auth", authRouter);
 app.use("/api/v1/connection", connectionRouter);
-app.use("/api/v1/agent",Agentrouter)
-app.use("/api/v1/session",SesstionRouter)
+app.use("/api/v1/agent", Agentrouter);
+app.use("/api/v1/session", SesstionRouter);
 app.use("/api", testrouter);
-
+app.use("/api/v1/workflow", workflowRouter);
+app.use("/api/v1/others",otherRouter)
 export { httpServer };

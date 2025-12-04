@@ -12,4 +12,5 @@ export const ENV = {
   MONGODB_URL: process.env.MONGODB_URL,
   GITHUB_CLIENT_ID: process.env.GITHUB_CLIENT_ID,
   GITHUB_CLIENT_SECRET: process.env.GITHUB_CLIENT_SECRET,
+  GEMINI_API_KEY: process.env.GEMINI_API_KEY,
 };

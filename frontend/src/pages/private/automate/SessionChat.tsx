@@ -251,7 +251,7 @@ function SessionChat() {
   }
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden bg-background">
+    <div className="h-full flex flex-col overflow-hidden bg-background">
       {/* 3. CHANGED: Use flex-1 instead of h-10/12 to perfectly fill available space */}
       <ScrollArea className="h-9/12 p-4">
         <div className="max-w-4xl mx-auto space-y-6 pb-4">
