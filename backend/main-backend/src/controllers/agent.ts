@@ -6,6 +6,34 @@ import OpenAI from "openai";
 import { ChatSession, SenderType } from "../models/chat/chatSession";
 import { Types } from "mongoose";
 import { ServiceConnection } from "../models/connect/serviceConnection";
+import crypto from "crypto";
+import { ENV } from "../config";
+const ALGORITHM = "aes-256-gcm";
+const ENCRYPTION_KEY = ENV.ENCRYPTION_KEY!;
+const IV_LENGTH = 16;
+
+const encryptResponse = (
+  content: string
+): { encrypted: string; iv: string; tag: string } => {
+  const iv = crypto.randomBytes(IV_LENGTH);
+  const cipher = crypto.createCipheriv(
+    ALGORITHM,
+    Buffer.from(ENCRYPTION_KEY, "hex"),
+    iv
+  );
+
+  let encrypted = cipher.update(content, "utf8", "hex");
+  encrypted += cipher.final("hex");
+
+  const tag = cipher.getAuthTag();
+
+  return {
+    encrypted,
+    iv: iv.toString("hex"),
+    tag: tag.toString("hex"),
+  };
+};
+
 export const HandleNormalChat = asyncHandler(
   async (req: Request, res: Response) => {
     try {
@@ -51,7 +79,20 @@ export const HandleNormalChat = asyncHandler(
       const agentResponse = orchestrator.finalOutput ?? orchestrator.output;
       console.log("[HandleNormalChat] orchestrator response:", agentResponse);
 
-      await chatSession.addMessage(SenderType.USER, message);
+      // Encrypt and save user message
+      const userMessageEncryption = encryptResponse(message);
+      await chatSession.addMessage(
+        SenderType.USER,
+        userMessageEncryption.encrypted,
+        {
+          encrypted: true,
+          iv: userMessageEncryption.iv,
+          tag: userMessageEncryption.tag,
+          metadata: {
+            encrypted: true,
+          },
+        }
+      );
 
       let responseData: any;
 
@@ -61,19 +102,27 @@ export const HandleNormalChat = asyncHandler(
         responseData = agentResponse;
       }
 
+      // Encrypt the response content before saving
       if (
         responseData &&
         typeof responseData === "object" &&
         "isDynamic" in responseData &&
         responseData.isDynamic
       ) {
-        await chatSession.addMessage(SenderType.AGENT, responseData.content, {
+        const contentToEncrypt = JSON.stringify(responseData.content);
+        const { encrypted, iv, tag } = encryptResponse(contentToEncrypt);
+
+        await chatSession.addMessage(SenderType.AGENT, encrypted, {
           agentName: "orchestrator",
           isDynamic: true,
           dynamicContent: responseData.dynamicContent,
+          encrypted: true,
+          iv,
+          tag,
           metadata: {
             model: "gpt-4",
             responseTime: Date.now(),
+            encrypted: true,
           },
         });
       } else {
@@ -82,19 +131,25 @@ export const HandleNormalChat = asyncHandler(
             ? responseData
             : JSON.stringify(responseData);
 
-        await chatSession.addMessage(SenderType.AGENT, textContent, {
+        const { encrypted, iv, tag } = encryptResponse(textContent);
+
+        await chatSession.addMessage(SenderType.AGENT, encrypted, {
           agentName: "orchestrator",
           isDynamic: false,
+          encrypted: true,
+          iv,
+          tag,
           metadata: {
             model: "gpt-4",
             responseTime: Date.now(),
+            encrypted: true,
           },
         });
       }
 
       return res.status(200).json(
         new ApiResponse(200, {
-          result: responseData,
+          result: responseData, // Return original unencrypted data to client
           sessionId: chatSession.sessionId,
         })
       );

@@ -13,4 +13,5 @@ export const ENV = {
   GITHUB_CLIENT_ID: process.env.GITHUB_CLIENT_ID,
   GITHUB_CLIENT_SECRET: process.env.GITHUB_CLIENT_SECRET,
   GEMINI_API_KEY: process.env.GEMINI_API_KEY,
+  ENCRYPTION_KEY: process.env.ENCRYPTION_KEY,
 };

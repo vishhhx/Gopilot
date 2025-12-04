@@ -322,7 +322,7 @@ export const Execute = asyncHandler(async (req: Request, res: Response) => {
       .json(new ApiResponse(400, result.errors, "Workflow validation failed"));
   }
 
-  const userId = "69286682fdb1160394721c8c"; // TODO: Get from auth middleware
+  const userId = "68f67b23041811cb079e00c8"; 
   const services = ["gmail", "sheets", "forms", "drive"];
 
   const connections = await ServiceConnection.find({ userId })
@@ -352,6 +352,7 @@ export const Execute = asyncHandler(async (req: Request, res: Response) => {
   const errors: ErrorInfo[] = [];
   const interrupts: InterruptInfo[] = [];
   const redis = new RedisService();
+
   const findNextAgentNode = (currentStage: number): StageNode | null => {
     for (let i = currentStage; i < sequence.length; i++) {
       const node = sequence[i];
@@ -361,6 +362,7 @@ export const Execute = asyncHandler(async (req: Request, res: Response) => {
     }
     return null;
   };
+
   const getNextStageInfo = (currentStage: number) => {
     const nextAgent = findNextAgentNode(currentStage + 1);
     if (!nextAgent) {
@@ -378,16 +380,138 @@ export const Execute = asyncHandler(async (req: Request, res: Response) => {
       service: nextAgent.data?.service || "",
     };
   };
+
+  // Helper function to extract relevant data from previous response
+  const extractRelevantContext = (response: any): string => {
+    if (!response) return "";
+
+    // Extract only essential information, avoiding full content duplication
+    if (typeof response === "string") {
+      return response.length > 300
+        ? response.substring(0, 300) + "..."
+        : response;
+    }
+
+    if (typeof response === "object") {
+      // For Gmail: extract key email info
+      if (response.emailId || response.messageId) {
+        return JSON.stringify({
+          emailId: response.emailId || response.messageId,
+          from: response.from,
+          subject: response.subject,
+          snippet: response.snippet || response.body?.substring(0, 200),
+        });
+      }
+
+      // For Sheets/Forms: extract data structure
+      if (response.spreadsheetId || response.formId) {
+        return JSON.stringify({
+          id: response.spreadsheetId || response.formId,
+          title: response.title,
+          rowCount: response.rowCount || response.data?.length,
+        });
+      }
+
+      // Generic object handling - only include non-large fields
+      const filtered: any = {};
+      for (const [key, value] of Object.entries(response)) {
+        if (typeof value === "string" && value.length > 200) {
+          filtered[key] = value.substring(0, 200) + "...";
+        } else if (Array.isArray(value) && value.length > 5) {
+          filtered[key] = `[${value.length} items]`;
+        } else {
+          filtered[key] = value;
+        }
+      }
+      return JSON.stringify(filtered);
+    }
+
+    return String(response);
+  };
+
+  // Build dynamic agent prompt
+  const buildAgentPrompt = (
+    currentStage: StageNode,
+    stageIndex: number,
+    previousResponse?: any,
+    nextStageInfo?: any
+  ): string => {
+    const agentNodes = sequence.filter((n) => n.node === "Agent");
+    const currentAgentIndex = sequence
+      .slice(0, stageIndex)
+      .filter((n) => n.node === "Agent").length;
+
+    const isFirstAgent = currentAgentIndex === 0;
+    const isLastAgent = currentAgentIndex === agentNodes.length - 1;
+
+    let prompt = `You are part of a multi-agent workflow system. Your role is "${
+      currentStage.data?.name
+    }" (${currentStage.data?.service}).
+
+WORKFLOW CONTEXT:
+- Current Stage: ${currentAgentIndex + 1} of ${agentNodes.length}
+- Your Task: ${
+      currentStage.data?.description || "Execute your specialized function"
+    }
+
+USER REQUEST: "${userPrompt}"
+
+`;
+
+    // Add previous agent context if not first
+    if (!isFirstAgent && previousResponse) {
+      const contextData = extractRelevantContext(previousResponse);
+      prompt += `PREVIOUS AGENT OUTPUT:
+The previous agent completed their task. Here's the relevant information:
+${contextData}
+
+`;
+    }
+
+    // Add next agent context if not last
+    if (!isLastAgent && nextStageInfo) {
+      prompt += `NEXT AGENT INFO:
+After you complete your task, the next agent will be "${nextStageInfo.agentRole}" (${nextStageInfo.service}).
+Ensure your output includes all necessary information for the next stage.
+
+`;
+    }
+
+    // Add specific instructions based on position
+    if (isFirstAgent) {
+      prompt += `INSTRUCTIONS:
+You are the FIRST agent in this workflow. Focus on the initial task from the user request. Structure your output clearly for the next agent to use.
+
+`;
+    } else if (isLastAgent) {
+      prompt += `INSTRUCTIONS:
+You are the FINAL agent in this workflow. Complete the user's request and provide a comprehensive final response.
+
+`;
+    } else {
+      prompt += `INSTRUCTIONS:
+Use the previous agent's output to complete your specific task. Ensure your output is structured for the next agent.
+
+`;
+    }
+
+    prompt += `Execute your specialized task now. Be concise and focused.`;
+
+    return prompt;
+  };
+
   try {
     for (let i = 0; i < sequence.length; i++) {
       const stageNode = sequence[i];
       console.log(
         `[Execute] Processing stage ${stageNode.stage}: ${stageNode.node}`
       );
+
       switch (stageNode.node) {
         case "Start":
           console.log("[Execute] Workflow started");
           break;
+
         case "Agent": {
           try {
             const agent = workflowService.getAgent(
@@ -400,38 +524,34 @@ export const Execute = asyncHandler(async (req: Request, res: Response) => {
                 `Agent not found: ${stageNode.data?.service}/${stageNode.data?.name}`
               );
             }
-            const previousAgents = sequence
-              .slice(0, i)
-              .filter((n) => n.node === "Agent");
-            const isFirstAgent = previousAgents.length === 0;
-            const previousResponse = isFirstAgent
-              ? undefined
-              : responses[responses.length - 1]?.response;
+
+            // Get previous response if exists
+            const previousResponse =
+              responses.length > 0
+                ? responses[responses.length - 1]?.response
+                : undefined;
+
+            // Get next stage info
             const nextStageInfo = getNextStageInfo(stageNode.stage);
-            const prompt = workflowService.generatePrompt(
-              isFirstAgent,
-              nextStageInfo || {
-                stageNumber: responses.length + 1,
-                totalStages: sequence.filter((n) => n.node === "Agent").length,
-                agentRole: "Final Agent",
-                taskDescription: "Complete the workflow",
-              },
-              userPrompt,
+
+            // Build dynamic prompt
+            const dynamicPrompt = buildAgentPrompt(
+              stageNode,
+              i,
               previousResponse,
-              {
-                currentAgent: stageNode.data?.name,
-                currentService: stageNode.data?.service,
-                metadata: {
-                  stage: stageNode.stage,
-                  nodeId: stageNode.nodeId,
-                },
-              }
+              nextStageInfo
             );
-            console.log(prompt);
-            console.log(`[Execute] Running agent: ${stageNode.data?.name}`);
-            const agentResult = await run(agent, userPrompt, {
+
+            console.log(
+              `[Execute] Agent prompt for stage ${stageNode.stage}:`,
+              dynamicPrompt.substring(0, 200) + "..."
+            );
+
+            // Execute agent with enhanced prompt
+            const agentResult = await run(agent, dynamicPrompt, {
               context,
             });
+
             const hasInterruptions = agentResult.interruptions?.length > 0;
             if (hasInterruptions) {
               console.log(
@@ -446,6 +566,7 @@ export const Execute = asyncHandler(async (req: Request, res: Response) => {
               });
               break;
             }
+
             if (agentResult.finalOutput?.isError) {
               console.error(
                 `[Execute] Error at stage ${stageNode.stage}:`,
@@ -460,6 +581,7 @@ export const Execute = asyncHandler(async (req: Request, res: Response) => {
               });
               break;
             }
+
             if (agentResult.finalOutput) {
               responses.push({
                 stage: stageNode.stage,

@@ -84,10 +84,6 @@ const availableAgents: Record<string, AgentDetail[]> = {
       description: "Apply formatting to Sheets",
     },
     {
-      name: "sheetsHelperAgent",
-      description: "Provide helper functions for Sheets",
-    },
-    {
       name: "sheetsManagementAgent",
       description: "Manage sheet tabs and structure",
     },

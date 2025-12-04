@@ -9,7 +9,8 @@ import PricingCards from "./PricingCards";
 import { MacbookScroll } from "../ui/macbook-scroll";
 import pajju from "../../assets/pajju.png";
 function HeroSection() {
-  const text = "Your AI Copilot for Gmail, Drive & Calendar";
+  const title="GoPilot"
+  const text = "- Google Automation Made Essay";
   const [scope, animate] = useAnimate();
 
   useEffect(() => {
@@ -54,6 +55,16 @@ function HeroSection() {
         ref={scope}
       >
         <motion.p className="w-[60rem] text-6xl text-center font-semibold dark:text-neutral-200 mask-r-from-65% to-0%">
+          
+          {title.split("").map((letter, idx) => (
+            <motion.span
+              key={idx}
+              className="t1 text-orange-600"
+              initial={{ opacity: 0, y: 100, filter: "blur(50px)" }}
+            >
+              {letter}
+            </motion.span>
+          ))}
           {text.split("").map((letter, idx) => (
             <motion.span
               key={idx}
@@ -64,6 +75,7 @@ function HeroSection() {
             </motion.span>
           ))}
         </motion.p>
+        
 
         <p className="dark:text-neutral-400 w-[40rem] text-center text-neutral-700">
           GoPilot brings Gmail, Drive, and Calendar together into one powerful
@@ -98,15 +110,15 @@ function HeroSection() {
         <TracingBeamFeatures />
       </div>
 
-      <div className="max-w-6xl mx-auto px-6 py-12 mt-20">
+      {/* <div className="max-w-6xl mx-auto px-6 py-12 mt-20">
         <h2 className="text-4xl font-bold text-center mb-6">
           Choose Your GoPolit
         </h2>
         <PricingCards />
-      </div>
+      </div> */}
 
       <div>
-        <MacbookScroll src={pajju} title="Made with Love by Vish " />
+        <MacbookScroll src={pajju} title="Upadating soon by  Brain.exe " />
       </div>
     </div>
   );

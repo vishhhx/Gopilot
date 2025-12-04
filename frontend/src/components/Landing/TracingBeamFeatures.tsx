@@ -15,7 +15,6 @@ import {
   Shield,
   Mail,
   Globe,
-  Eye,
   Brain,
   Search,
   AlertTriangle,
@@ -33,13 +32,14 @@ export function TracingBeamFeatures() {
         {/* ----------- SECTION HEADING ----------- */}
         <div className="text-center mb-12">
           <h2 className="text-3xl md:text-4xl font-bold tracking-tight text-neutral-900 dark:text-white">
-            Why Choose <span className="text-primary">GoPilot</span>?
+            Why Choose <span className="text-primary">AgentHub</span>?
           </h2>
           <p className="mt-3 text-base text-muted-foreground max-w-xl mx-auto">
-            GoPilot is an AI-powered workspace assistant that unifies Gmail,
-            Google Drive, Google Sheets and Calendar into one conversational
-            interface — so you can automate multi-step tasks (read a sheet,
-            draft personalized emails, schedule meetings) with a single prompt.
+            AgentHub is an open marketplace and workflow-builder for AI agents.
+            Share, discover and reuse pre-built agent workflows — other users
+            can copy a workflow's ID and import or run it instantly in their
+            workspace. Build complex multi-step automations visually and publish
+            them for the community.
           </p>
         </div>
 
@@ -103,26 +103,9 @@ interface Feature {
   points: FeaturePoint[];
 }
 
-// ---------------- DATA (GoPilot version) ---------------- //
+// ---------------- DATA (AgentHub version) ---------------- //
 
 const features: Feature[] = [
-  {
-    title: "Unified AI Workspace Assistant",
-    description:
-      "Interact with Gmail, Google Drive, Calendar, and Sheets through a single conversational interface powered by the OpenAI Agent SDK.",
-    badge: "Workspace Automation",
-    icon: Brain,
-    points: [
-      { text: "Natural language commands for Google services", icon: Globe },
-      { text: "Cross-service orchestration handled by AI", icon: Shield },
-      { text: "Context-aware multi-step reasoning", icon: Brain },
-      {
-        text: "Fast switching between tasks without app hopping",
-        icon: Search,
-      },
-    ],
-  },
-
   {
     title: "Multi-Step Email Automation",
     description:
@@ -140,23 +123,6 @@ const features: Feature[] = [
         icon: AlertTriangle,
       },
       { text: "Gmail + AI-powered workflow optimization", icon: Globe },
-    ],
-  },
-
-  {
-    title: "Document & File Intelligence",
-    description:
-      "Instantly search, retrieve, summarize, and analyze Google Drive documents using semantic search powered by Qdrant.",
-    badge: "File Intelligence",
-    icon: Database,
-    points: [
-      { text: "Semantic search across Drive documents", icon: Search },
-      { text: "Summarize PDFs, DOCX, and uploaded files", icon: Eye },
-      { text: "Extract insights, action items and highlights", icon: Brain },
-      {
-        text: "Unified file access and previews directly from chat",
-        icon: Globe,
-      },
     ],
   },
 
@@ -190,6 +156,39 @@ const features: Feature[] = [
       {
         text: "Trigger cross-service operations from a sheet row",
         icon: Globe,
+      },
+    ],
+  },
+  {
+    title: "Agent Workflow Builder",
+    description:
+      "Design, publish and import reusable agent workflows. Share workflows publicly on AgentHub — other users can copy a workflow ID to import or run the exact automation in their own workspace.",
+    badge: "AgentHub",
+    icon: Brain,
+    points: [
+      { text: "Visual workflow builder with drag & drop nodes", icon: Globe },
+      { text: "Shareable workflow IDs for one-click import", icon: Search },
+      { text: "Versioning, templates and community gallery", icon: Shield },
+      {
+        text: "Run, debug and monitor executions in real time",
+        icon: Database,
+      },
+    ],
+  },
+
+  {
+    title: "Unified AI Workspace Assistant",
+    description:
+      "Interact with Gmail, Google Drive, Calendar, and Sheets through a single conversational interface powered by the OpenAI Agent SDK.",
+    badge: "Workspace Automation",
+    icon: Brain,
+    points: [
+      { text: "Natural language commands for Google services", icon: Globe },
+      { text: "Cross-service orchestration handled by AI", icon: Shield },
+      { text: "Context-aware multi-step reasoning", icon: Brain },
+      {
+        text: "Fast switching between tasks without app hopping",
+        icon: Search,
       },
     ],
   },
