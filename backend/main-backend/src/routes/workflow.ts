@@ -8,7 +8,7 @@ import {
 } from "../controllers/workflow";
 import { isAuthenticated } from "../middleware/auth";
 const workflowRouter = Router();
-// workflowRouter.use(isAuthenticated);
+workflowRouter.use(isAuthenticated);
 workflowRouter.post("/", createWorkflow);
 workflowRouter.get("/", getWorkflowsByUser);
 workflowRouter.get("/:id", getWorkflowById);

@@ -45,6 +45,9 @@ interface IMessage {
   content: string;
   isDynamic: boolean;
   dynamicContent?: IDynamicContent[];
+  encrypted?: boolean; // New field
+  iv?: string; // New field for encryption
+  tag?: string; // New field for encryption
   timestamp: Date;
   metadata?: {
     model?: string;
@@ -52,6 +55,7 @@ interface IMessage {
     responseTime?: number;
     isEdited?: boolean;
     editedAt?: Date;
+    encrypted?: boolean; // New field
     [key: string]: any;
   };
 }
@@ -84,6 +88,9 @@ interface IChatSessionMethods {
       agentName?: string;
       isDynamic?: boolean;
       dynamicContent?: IDynamicContent[];
+      encrypted?: boolean; // New field
+      iv?: string; // New field
+      tag?: string; // New field
       metadata?: any;
     }
   ): Promise<IChatSession & IChatSessionMethods>;
@@ -102,31 +109,11 @@ interface IChatSessionModel
   ): Promise<IChatSession & IChatSessionMethods>;
 }
 
-// Update main interface - remove methods from here, they're in IChatSessionMethods
-export interface IChatSession extends Document {
-  userId: Types.ObjectId;
-  sessionId: string;
-  title?: string;
-  conversation: IConversation[];
-  status: "active" | "archived" | "deleted";
-  createdAt: Date;
-  updatedAt: Date;
-  lastMessageAt: Date;
-  metadata?: {
-    totalMessages: number;
-    totalTokens?: number;
-    tags?: string[];
-    isPinned?: boolean;
-    [key: string]: any;
-  };
-}
-
 const MessageSchema = new Schema<IMessage>(
   {
     messageId: {
       type: String,
       required: true,
-
       default: () => new Types.ObjectId().toString(),
     },
     sender: {
@@ -162,6 +149,16 @@ const MessageSchema = new Schema<IMessage>(
         data: Schema.Types.Mixed,
       },
     ],
+    encrypted: {
+      type: Boolean,
+      default: false,
+    },
+    iv: {
+      type: String,
+    },
+    tag: {
+      type: String,
+    },
     timestamp: {
       type: Date,
       default: Date.now,
@@ -251,6 +248,9 @@ ChatSessionSchema.methods.addMessage = async function (
     agentName?: string;
     isDynamic?: boolean;
     dynamicContent?: IDynamicContent[];
+    encrypted?: boolean;
+    iv?: string;
+    tag?: string;
     metadata?: any;
   }
 ): Promise<IChatSession & IChatSessionMethods> {
@@ -262,6 +262,9 @@ ChatSessionSchema.methods.addMessage = async function (
     timestamp: new Date(),
     ...(options?.agentName && { agentName: options.agentName }),
     ...(options?.dynamicContent && { dynamicContent: options.dynamicContent }),
+    ...(options?.encrypted && { encrypted: options.encrypted }),
+    ...(options?.iv && { iv: options.iv }),
+    ...(options?.tag && { tag: options.tag }),
     ...(options?.metadata && { metadata: options.metadata }),
   };
 
@@ -300,13 +303,13 @@ ChatSessionSchema.statics.createSession = async function (
   return await session.save();
 };
 
-// Export with correct typing - IMPORTANT: both generics
+
 export const ChatSession = mongoose.model<IChatSession, IChatSessionModel>(
   "ChatSession",
   ChatSessionSchema
 );
 
-// Export types and enums
+
 export {
   SenderType,
   DynamicContentType,

@@ -1,4 +1,3 @@
-
 import { Agent, handoff } from "@openai/agents";
 import { RECOMMENDED_PROMPT_PREFIX } from "@openai/agents-core/extensions";
 import {
@@ -19,7 +18,7 @@ import {
   exportResponsesTool,
   getAnalyticsTool,
 } from "../tools/form";
-import { sheetsAgent } from "./sheet";
+import { sheetsCoordinatorAgent } from "./orchestrator";
 import { z } from "zod";
 
 const DynamicContentSchema = z.object({
@@ -53,19 +52,29 @@ const DynamicContentSchema = z.object({
       shareableLink: z.string().nullable(),
       shortLink: z.string().nullable(),
       embedCode: z.string().nullable(),
-      questions: z.array(z.object({
-        id: z.string(),
-        title: z.string(),
-        type: z.string(),
-      })).nullable(),
-      responses: z.array(z.object({
-        id: z.string(),
-        formId: z.string(),
-      })).nullable(),
-      analytics: z.object({
-        totalResponses: z.number().nullable(),
-        completionRate: z.number().nullable(),
-      }).nullable(),
+      questions: z
+        .array(
+          z.object({
+            id: z.string(),
+            title: z.string(),
+            type: z.string(),
+          })
+        )
+        .nullable(),
+      responses: z
+        .array(
+          z.object({
+            id: z.string(),
+            formId: z.string(),
+          })
+        )
+        .nullable(),
+      analytics: z
+        .object({
+          totalResponses: z.number().nullable(),
+          completionRate: z.number().nullable(),
+        })
+        .nullable(),
     })
     .nullable(),
 });
@@ -99,7 +108,14 @@ You are the Form reader.
 - Return structured summaries (id, title, status, questionCount, responseCount)
 - If user wants actions after listing (delete/edit/etc.), present results then hand off
 ${RESPONSE_FORMAT_INSTRUCTIONS}`,
-  tools: [listFormsTool, listFormIdsTool, getFormTool, listResponsesTool, getResponseTool, getAnalyticsTool],
+  tools: [
+    listFormsTool,
+    listFormIdsTool,
+    getFormTool,
+    listResponsesTool,
+    getResponseTool,
+    getAnalyticsTool,
+  ],
   outputType: AgentResponseSchema,
 });
 
@@ -116,7 +132,12 @@ You are the Form creator.
 - Ask for confirmation if creating forms with many questions (>10)
 - Use operation "created" for new forms, "duplicated" for copies, "question_added"/"question_removed" for modifications
 ${RESPONSE_FORMAT_INSTRUCTIONS}`,
-  tools: [createFormTool, addQuestionTool, removeQuestionTool, duplicateFormTool],
+  tools: [
+    createFormTool,
+    addQuestionTool,
+    removeQuestionTool,
+    duplicateFormTool,
+  ],
   outputType: AgentResponseSchema,
 });
 
@@ -133,7 +154,13 @@ You are the Form response handler.
 - For bulk exports (>100 responses) ask for confirmation
 - Use operation "response_submitted" for submissions, "responses_exported" for exports
 ${RESPONSE_FORMAT_INSTRUCTIONS}`,
-  tools: [submitResponseTool, listResponsesTool, getResponseTool, exportResponsesTool, getAnalyticsTool],
+  tools: [
+    submitResponseTool,
+    listResponsesTool,
+    getResponseTool,
+    exportResponsesTool,
+    getAnalyticsTool,
+  ],
   outputType: AgentResponseSchema,
 });
 
@@ -154,7 +181,8 @@ ${RESPONSE_FORMAT_INSTRUCTIONS}`,
 
 export const formDeleteAgent = new Agent({
   name: "form-delete-agent",
-  handoffDescription: "Delete forms and responses (requires explicit confirmation).",
+  handoffDescription:
+    "Delete forms and responses (requires explicit confirmation).",
   instructions: `${RECOMMENDED_PROMPT_PREFIX}
 You are the Form permanent-delete agent.
 CRITICAL:
@@ -211,7 +239,7 @@ ${RESPONSE_FORMAT_INSTRUCTIONS}`,
   tools: [],
   handoffs: [
     ...formHandoffs,
-    handoff(sheetsAgent, {
+    handoff(sheetsCoordinatorAgent, {
       toolDescriptionOverride: "Forms → Sheets cross-service workflows.",
     }),
   ],

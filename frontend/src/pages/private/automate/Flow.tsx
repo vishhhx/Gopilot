@@ -51,12 +51,14 @@ import {
   SaveIcon,
   CheckCircle,
   XCircle,
+  HatGlasses,
 } from "lucide-react";
 import { axiosInstance } from "@/utils";
 import { useParams } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { GenerateWorkflowDialog } from "@/components/workflow/GenerateWorkflowDialog";
 
 // ============= TYPES =============
 interface Workflow {
@@ -239,6 +241,7 @@ function FlowContent() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const [isAssistantOpen, setIsAssistantOpen] = useState<boolean>(false);
 
   // React Flow callbacks
   const onNodesChange = useCallback(
@@ -336,8 +339,6 @@ function FlowContent() {
       const validEdges = edges.filter(
         (edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target)
       );
-
-      // Remove any undefined/null values from node data
       const cleanNodes = nodes.map((node) => ({
         ...node,
         measured: node.measured || null,
@@ -449,6 +450,11 @@ function FlowContent() {
     }
     return "-";
   }, [workflow.updatedAt]);
+
+  const handleWorkFlowGenerate = (data) => {
+    setNodes(data?.nodes);
+    setEdges(data?.edges);
+  };
 
   // Save button content
   const getSaveButtonContent = () => {
@@ -564,6 +570,15 @@ function FlowContent() {
 
         <div className="flex items-center gap-2">
           <Button
+            className="gap-2 cursor-pointer"
+            variant={"outline"}
+            onClick={() => setIsAssistantOpen(true)}
+          >
+            <HatGlasses className="h-4 w-4" />
+            Aegnt
+          </Button>
+
+          <Button
             variant="outline"
             className="gap-2"
             onClick={saveWorkflow}
@@ -585,6 +600,11 @@ function FlowContent() {
           </Button>
         </div>
       </div>
+      <GenerateWorkflowDialog
+        onCreated={handleWorkFlowGenerate}
+        open={isAssistantOpen}
+        setOpen={setIsAssistantOpen}
+      />
 
       {/* Sidebar */}
       <aside className="w-[380px] h-full flex flex-col border-r bg-card/50 backdrop-blur-xl z-10 shadow-xl shadow-black/5">
