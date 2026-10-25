@@ -1,36 +1,45 @@
+import { useState } from "react";
 import { FcGoogle } from "react-icons/fc";
-import { Button } from "../ui/button";
 import { FaGithub } from "react-icons/fa";
+import { toast } from "sonner";
 import { AuthServices } from "@/services";
+import { API_BASE } from "@/utils";
+import { errorMessage } from "@/lib/format";
+import { Button } from "@/components/ui/button";
+import { Blossom } from "@/components/bloom/Blossom";
 
+/** Google first (GoPilot works in Google apps), GitHub as the other way in. */
 function Oauth() {
-  const handleGoogleOAuthInit = async () => {
+  const [going, setGoing] = useState<"google" | "github" | null>(null);
+
+  const google = async () => {
     try {
+      setGoing("google");
       const response = await AuthServices.googleOauthInit();
       window.location.href = response.data;
-      console.log(response);
-    } catch (error) {
-      console.log(error);
+    } catch (err) {
+      setGoing(null);
+      toast.error("Couldn't reach Google sign-in", { description: errorMessage(err, "Check your connection and try again.") });
     }
   };
-  const handleGithubOAuthInit = async () => {
-    try {
-      window.location.href =
-        "http://localhost:5000/api/v1/auth/github/oauth-init";
-    } catch (error) {
-      console.log(error);
-    }
+
+  const github = () => {
+    setGoing("github");
+    window.location.href = `${API_BASE}auth/github/oauth-init`;
   };
+
   return (
-    <div>
-      <div className="flex flex-col gap-2">
-        <Button className="cursor-pointer" onClick={handleGoogleOAuthInit}>
-          <FcGoogle /> <span>Continue with google</span>
-        </Button>
-        <Button className="cursor-pointer" onClick={handleGithubOAuthInit}>
-          <FaGithub /> <span>Continue with Github</span>
-        </Button>
-      </div>
+    <div className="flex flex-col gap-2.5">
+      <Button size="lg" onClick={google} disabled={going !== null} className="h-12 text-[15.5px]">
+        <span className="flex size-6 items-center justify-center rounded-full bg-white">
+          {going === "google" ? <Blossom size={16} motion="loading" /> : <FcGoogle className="size-4" />}
+        </span>
+        Continue with Google
+      </Button>
+      <Button size="lg" variant="outline" onClick={github} disabled={going !== null} className="h-12 text-[15.5px]">
+        {going === "github" ? <Blossom size={18} motion="loading" /> : <FaGithub className="size-[18px]" />}
+        Continue with GitHub
+      </Button>
     </div>
   );
 }

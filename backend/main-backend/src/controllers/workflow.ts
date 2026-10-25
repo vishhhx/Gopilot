@@ -1,10 +1,40 @@
 import { Request, Response } from "express";
 import { Types } from "mongoose";
-import { ApiResponse, asyncHandler, RedisService } from "../utils";
-import { WorkflowModel, NodeType, EdgeType } from "../models/workflow/workflow";
-import { WorkflowService } from "../utils/workflow";
-import { run } from "@openai/agents";
-import { ServiceConnection } from "../models/connect/serviceConnection";
+import { ApiResponse, asyncHandler } from "../utils";
+import { WorkflowModel, NodeType, EdgeType, InputField, INPUT_FIELD_TYPES } from "../models/workflow/workflow";
+import { WorkflowRunModel } from "../models/workflow/workflowRun";
+import { RunInputError, reviewRun, serializeRun, startRun } from "../workflow/engine";
+import { buildPlan } from "../workflow/plan";
+import { validTimeZone } from "../utils/time";
+
+
+/** Cleans the input fields sent by the canvas: a usable key for each, no duplicates. */
+const normalizeInputs = (raw: unknown): InputField[] => {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  return raw.slice(0, 20).flatMap((f: any) => {
+    const label = String(f?.label ?? "").trim();
+    if (!label) return [];
+    let key = String(f?.key || label)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_|_$/g, "") || "field";
+    while (seen.has(key)) key = `${key}_2`;
+    seen.add(key);
+    return [
+      {
+        key,
+        label,
+        type: (INPUT_FIELD_TYPES as readonly string[]).includes(f?.type) ? f.type : "text",
+        required: f?.required !== false,
+        ...(f?.description ? { description: String(f.description).trim() } : {}),
+        ...(f?.type === "select" && Array.isArray(f?.options)
+          ? { options: [...new Set(f.options.map((o: unknown) => String(o).trim()).filter(Boolean))].slice(0, 30) as string[] }
+          : {}),
+      },
+    ];
+  });
+};
 
 export const createWorkflow = asyncHandler(
   async (req: Request, res: Response) => {
@@ -13,7 +43,7 @@ export const createWorkflow = asyncHandler(
       return res.status(401).json(new ApiResponse(401, null, "Unauthorized"));
     }
 
-    const { title, description, nodes = [], edges = [] } = req.body;
+    const { title, description, edges = [], inputs } = req.body;
 
     if (!title) {
       return res
@@ -43,6 +73,7 @@ export const createWorkflow = asyncHandler(
       description,
       nodes: initialNode,
       edges,
+      inputs: normalizeInputs(inputs),
     });
 
     if (!workflow) {
@@ -116,7 +147,7 @@ export const updateWorkflowNodesEdges = asyncHandler(
   async (req: Request, res: Response) => {
     const userId = req.user?.userId;
     const { id } = req.params;
-    const { nodes, edges } = req.body;
+    const { nodes, edges, inputs } = req.body;
 
     if (!userId) {
       return res.status(401).json(new ApiResponse(401, null, "Unauthorized"));
@@ -175,11 +206,15 @@ export const updateWorkflowNodesEdges = asyncHandler(
       updatePayload.edges = validEdges;
     }
 
+    if (Array.isArray(inputs)) {
+      updatePayload.inputs = normalizeInputs(inputs);
+    }
+
     if (Object.keys(updatePayload).length === 0) {
       return res
         .status(400)
         .json(
-          new ApiResponse(400, null, "No nodes or edges provided to update")
+          new ApiResponse(400, null, "No nodes, edges or inputs provided to update")
         );
     }
 
@@ -193,552 +228,84 @@ export const updateWorkflowNodesEdges = asyncHandler(
   }
 );
 
-interface StageNode {
-  stage: number;
-  node: string;
-  data: any;
-  nodeId: string;
-  nextNodeId: string | null;
-  end: boolean;
-}
-
-interface AgentResponse {
-  stage: number;
-  nodeId: string;
-  response: any;
-  service?: string;
-  agentName?: string;
-}
-
-interface ErrorInfo {
-  stage: number;
-  nodeId: string;
-  error: any;
-  service?: string;
-  agentName?: string;
-}
-
-interface InterruptInfo {
-  stage: number;
-  nodeId: string;
-  state: any;
-  service?: string;
-  agentName?: string;
-}
-
-export const Execute = asyncHandler(async (req: Request, res: Response) => {
-  const { nodes, edges, userPrompt } = req.body;
-
-  if (!nodes || !edges) {
-    return res
-      .status(400)
-      .json(new ApiResponse(400, null, "No nodes or edges provided"));
-  }
-
-  if (
-    !userPrompt ||
-    typeof userPrompt !== "string" ||
-    userPrompt.trim().length === 0
-  ) {
-    return res
-      .status(400)
-      .json(new ApiResponse(400, null, "User prompt is required"));
-  }
-
-  if (!Array.isArray(nodes)) {
-    return res
-      .status(400)
-      .json(
-        new ApiResponse(
-          400,
-          ["Missing or invalid 'nodes' field"],
-          "Invalid request: 'nodes' must be an array"
-        )
-      );
-  }
-
-  if (!Array.isArray(edges)) {
-    return res
-      .status(400)
-      .json(
-        new ApiResponse(
-          400,
-          ["Missing or invalid 'edges' field"],
-          "Invalid request: 'edges' must be an array"
-        )
-      );
-  }
-
-  if (nodes.length === 0) {
-    return res
-      .status(400)
-      .json(
-        new ApiResponse(
-          400,
-          ["Empty nodes array"],
-          "Workflow must contain at least one node"
-        )
-      );
-  }
-
-  const nodeIds = new Set(nodes.map((n: any) => n.id));
-  const invalidEdges: string[] = [];
-
-  edges.forEach((edge: any, index: number) => {
-    if (!nodeIds.has(edge.source)) {
-      invalidEdges.push(
-        `Edge ${index + 1} references non-existent source node: ${edge.source}`
-      );
-    }
-    if (!nodeIds.has(edge.target)) {
-      invalidEdges.push(
-        `Edge ${index + 1} references non-existent target node: ${edge.target}`
-      );
-    }
-  });
-
-  let validEdges = edges;
-  if (invalidEdges.length > 0) {
-    console.warn(
-      `Found ${invalidEdges.length} invalid edges, filtering them out`
-    );
-    validEdges = edges.filter(
-      (edge: any) => nodeIds.has(edge.source) && nodeIds.has(edge.target)
-    );
-
-    if (validEdges.length === 0) {
-      return res
-        .status(400)
-        .json(new ApiResponse(400, invalidEdges, "All edges are invalid"));
-    }
-  }
-
-  const workflowService = new WorkflowService();
-  const result = workflowService.generateExecutionSequence(nodes, validEdges);
-
-  if (result.errors.length > 0) {
-    return res
-      .status(400)
-      .json(new ApiResponse(400, result.errors, "Workflow validation failed"));
-  }
-
-  const userId = "68f67b23041811cb079e00c8"; 
-  const services = ["gmail", "sheets", "forms", "drive"];
-
-  const connections = await ServiceConnection.find({ userId })
-    .populate({
-      path: "connectionDefId",
-      select: "service",
-    })
-    .select("connectionDefId userId status refreshToken");
-
-  const context = connections
-    .filter(
-      (c) =>
-        c.connectionDefId &&
-        typeof c.connectionDefId === "object" &&
-        services.includes((c.connectionDefId as any).service) &&
-        c.refreshToken
-    )
-    .map((c) => ({
-      service: (c.connectionDefId as any).service,
-      refreshToken: c.refreshToken as string,
-    }));
-
-  console.log("[Execute] Service context:", context);
-
-  const sequence: StageNode[] = result.sequence;
-  const responses: AgentResponse[] = [];
-  const errors: ErrorInfo[] = [];
-  const interrupts: InterruptInfo[] = [];
-  const redis = new RedisService();
-
-  const findNextAgentNode = (currentStage: number): StageNode | null => {
-    for (let i = currentStage; i < sequence.length; i++) {
-      const node = sequence[i];
-      if (node.node === "Agent") {
-        return node;
-      }
-    }
+/** Loads a workflow the user owns, or sends the error response and returns null. */
+const ownWorkflow = async (req: Request, res: Response) => {
+  const { id } = req.params;
+  if (!Types.ObjectId.isValid(id)) {
+    res.status(400).json(new ApiResponse(400, null, "Invalid workflow id"));
     return null;
-  };
-
-  const getNextStageInfo = (currentStage: number) => {
-    const nextAgent = findNextAgentNode(currentStage + 1);
-    if (!nextAgent) {
-      return null;
-    }
-    const totalAgents = sequence.filter((n) => n.node === "Agent").length;
-    const currentAgentIndex = sequence
-      .slice(0, currentStage)
-      .filter((n) => n.node === "Agent").length;
-    return {
-      stageNumber: currentAgentIndex + 2,
-      totalStages: totalAgents,
-      agentRole: nextAgent.data?.name || "Agent",
-      taskDescription: nextAgent.data?.description || "",
-      service: nextAgent.data?.service || "",
-    };
-  };
-
-  // Helper function to extract relevant data from previous response
-  const extractRelevantContext = (response: any): string => {
-    if (!response) return "";
-
-    // Extract only essential information, avoiding full content duplication
-    if (typeof response === "string") {
-      return response.length > 300
-        ? response.substring(0, 300) + "..."
-        : response;
-    }
-
-    if (typeof response === "object") {
-      // For Gmail: extract key email info
-      if (response.emailId || response.messageId) {
-        return JSON.stringify({
-          emailId: response.emailId || response.messageId,
-          from: response.from,
-          subject: response.subject,
-          snippet: response.snippet || response.body?.substring(0, 200),
-        });
-      }
-
-      // For Sheets/Forms: extract data structure
-      if (response.spreadsheetId || response.formId) {
-        return JSON.stringify({
-          id: response.spreadsheetId || response.formId,
-          title: response.title,
-          rowCount: response.rowCount || response.data?.length,
-        });
-      }
-
-      // Generic object handling - only include non-large fields
-      const filtered: any = {};
-      for (const [key, value] of Object.entries(response)) {
-        if (typeof value === "string" && value.length > 200) {
-          filtered[key] = value.substring(0, 200) + "...";
-        } else if (Array.isArray(value) && value.length > 5) {
-          filtered[key] = `[${value.length} items]`;
-        } else {
-          filtered[key] = value;
-        }
-      }
-      return JSON.stringify(filtered);
-    }
-
-    return String(response);
-  };
-
-  // Build dynamic agent prompt
-  const buildAgentPrompt = (
-    currentStage: StageNode,
-    stageIndex: number,
-    previousResponse?: any,
-    nextStageInfo?: any
-  ): string => {
-    const agentNodes = sequence.filter((n) => n.node === "Agent");
-    const currentAgentIndex = sequence
-      .slice(0, stageIndex)
-      .filter((n) => n.node === "Agent").length;
-
-    const isFirstAgent = currentAgentIndex === 0;
-    const isLastAgent = currentAgentIndex === agentNodes.length - 1;
-
-    let prompt = `You are part of a multi-agent workflow system. Your role is "${
-      currentStage.data?.name
-    }" (${currentStage.data?.service}).
-
-WORKFLOW CONTEXT:
-- Current Stage: ${currentAgentIndex + 1} of ${agentNodes.length}
-- Your Task: ${
-      currentStage.data?.description || "Execute your specialized function"
-    }
-
-USER REQUEST: "${userPrompt}"
-
-`;
-
-    // Add previous agent context if not first
-    if (!isFirstAgent && previousResponse) {
-      const contextData = extractRelevantContext(previousResponse);
-      prompt += `PREVIOUS AGENT OUTPUT:
-The previous agent completed their task. Here's the relevant information:
-${contextData}
-
-`;
-    }
-
-    // Add next agent context if not last
-    if (!isLastAgent && nextStageInfo) {
-      prompt += `NEXT AGENT INFO:
-After you complete your task, the next agent will be "${nextStageInfo.agentRole}" (${nextStageInfo.service}).
-Ensure your output includes all necessary information for the next stage.
-
-`;
-    }
-
-    // Add specific instructions based on position
-    if (isFirstAgent) {
-      prompt += `INSTRUCTIONS:
-You are the FIRST agent in this workflow. Focus on the initial task from the user request. Structure your output clearly for the next agent to use.
-
-`;
-    } else if (isLastAgent) {
-      prompt += `INSTRUCTIONS:
-You are the FINAL agent in this workflow. Complete the user's request and provide a comprehensive final response.
-
-`;
-    } else {
-      prompt += `INSTRUCTIONS:
-Use the previous agent's output to complete your specific task. Ensure your output is structured for the next agent.
-
-`;
-    }
-
-    prompt += `Execute your specialized task now. Be concise and focused.`;
-
-    return prompt;
-  };
-
-  try {
-    for (let i = 0; i < sequence.length; i++) {
-      const stageNode = sequence[i];
-      console.log(
-        `[Execute] Processing stage ${stageNode.stage}: ${stageNode.node}`
-      );
-
-      switch (stageNode.node) {
-        case "Start":
-          console.log("[Execute] Workflow started");
-          break;
-
-        case "Agent": {
-          try {
-            const agent = workflowService.getAgent(
-              stageNode.data?.service,
-              stageNode.data?.name
-            );
-
-            if (!agent) {
-              throw new Error(
-                `Agent not found: ${stageNode.data?.service}/${stageNode.data?.name}`
-              );
-            }
-
-            // Get previous response if exists
-            const previousResponse =
-              responses.length > 0
-                ? responses[responses.length - 1]?.response
-                : undefined;
-
-            // Get next stage info
-            const nextStageInfo = getNextStageInfo(stageNode.stage);
-
-            // Build dynamic prompt
-            const dynamicPrompt = buildAgentPrompt(
-              stageNode,
-              i,
-              previousResponse,
-              nextStageInfo
-            );
-
-            console.log(
-              `[Execute] Agent prompt for stage ${stageNode.stage}:`,
-              dynamicPrompt.substring(0, 200) + "..."
-            );
-
-            // Execute agent with enhanced prompt
-            const agentResult = await run(agent, dynamicPrompt, {
-              context,
-            });
-
-            const hasInterruptions = agentResult.interruptions?.length > 0;
-            if (hasInterruptions) {
-              console.log(
-                `[Execute] Interruption detected at stage ${stageNode.stage}`
-              );
-              interrupts.push({
-                stage: stageNode.stage,
-                nodeId: stageNode.nodeId,
-                state: agentResult.state,
-                service: stageNode.data?.service,
-                agentName: stageNode.data?.name,
-              });
-              break;
-            }
-
-            if (agentResult.finalOutput?.isError) {
-              console.error(
-                `[Execute] Error at stage ${stageNode.stage}:`,
-                agentResult.finalOutput.error
-              );
-              errors.push({
-                stage: stageNode.stage,
-                nodeId: stageNode.nodeId,
-                error: agentResult.finalOutput.error || "Unknown error",
-                service: stageNode.data?.service,
-                agentName: stageNode.data?.name,
-              });
-              break;
-            }
-
-            if (agentResult.finalOutput) {
-              responses.push({
-                stage: stageNode.stage,
-                nodeId: stageNode.nodeId,
-                response: agentResult.finalOutput,
-                service: stageNode.data?.service,
-                agentName: stageNode.data?.name,
-              });
-              console.log(
-                `[Execute] Stage ${stageNode.stage} completed successfully`
-              );
-            }
-          } catch (error: any) {
-            console.error(
-              `[Execute] Exception at stage ${stageNode.stage}:`,
-              error
-            );
-            errors.push({
-              stage: stageNode.stage,
-              nodeId: stageNode.nodeId,
-              error: error.message || "Agent execution failed",
-              service: stageNode.data?.service,
-              agentName: stageNode.data?.name,
-            });
-            break;
-          }
-          break;
-        }
-
-        case "Checker": {
-          if (errors.length > 0) {
-            console.log("[Execute] Checker: Errors detected, halting workflow");
-            return res.status(500).json(
-              new ApiResponse(
-                500,
-                {
-                  errors,
-                  completedStages: responses,
-                  failedAt: stageNode.stage,
-                },
-                "Workflow execution failed with errors"
-              )
-            );
-          }
-          if (interrupts.length > 0) {
-            console.log("[Execute] Checker: Human in loop required");
-            const interruptId = crypto.randomUUID();
-
-            try {
-              await redis.addInterrupt(
-                interruptId,
-                JSON.stringify({
-                  interrupt: interrupts[0],
-                  completedStages: responses,
-                  userPrompt,
-                  sequence,
-                  currentStage: stageNode.stage,
-                })
-              );
-
-              return res.status(202).json(
-                new ApiResponse(
-                  202,
-                  {
-                    interruptId,
-                    interrupt: interrupts[0],
-                    completedStages: responses,
-                    message: "Human intervention required",
-                  },
-                  "Workflow paused for human input"
-                )
-              );
-            } catch (redisError: any) {
-              console.error("[Execute] Redis error:", redisError);
-              return res
-                .status(500)
-                .json(
-                  new ApiResponse(
-                    500,
-                    { error: redisError.message },
-                    "Failed to store interrupt state"
-                  )
-                );
-            }
-          }
-
-          console.log(
-            `[Execute] Checker at stage ${stageNode.stage}: All checks passed`
-          );
-          break;
-        }
-
-        case "End": {
-          console.log("[Execute] Workflow completed successfully");
-          const summary = responses.map((r, idx) => ({
-            agent: r.agentName,
-            service: r.service,
-            stage: r.stage,
-            output: r.response,
-          }));
-
-          return res.status(200).json(
-            new ApiResponse(
-              200,
-              {
-                summary,
-                totalStages: responses.length,
-                responses,
-                userPrompt,
-              },
-              "Workflow executed successfully"
-            )
-          );
-        }
-
-        default:
-          console.warn(`[Execute] Unknown node type: ${stageNode.node}`);
-          break;
-      }
-    }
-
-    if (errors.length > 0) {
-      return res.status(500).json(
-        new ApiResponse(
-          500,
-          {
-            errors,
-            completedStages: responses,
-          },
-          "Workflow execution incomplete due to errors"
-        )
-      );
-    }
-
-    return res.status(200).json(
-      new ApiResponse(
-        200,
-        {
-          responses,
-          message: "Workflow completed (no End node found)",
-        },
-        "Workflow execution completed"
-      )
-    );
-  } catch (error: any) {
-    console.error("[Execute] Fatal error:", error);
-    return res.status(500).json(
-      new ApiResponse(
-        500,
-        {
-          error: error.message,
-          stack:
-            process.env.NODE_ENV === "development" ? error.stack : undefined,
-          completedStages: responses,
-        },
-        "Workflow execution failed"
-      )
-    );
   }
+  const workflow = await WorkflowModel.findOne({ _id: id, userId: req.user.userId, isDeleted: false });
+  if (!workflow) {
+    res.status(404).json(new ApiResponse(404, null, "Workflow not found"));
+    return null;
+  }
+  return workflow;
+};
+
+const ownRun = async (req: Request, res: Response) => {
+  const { runId } = req.params;
+  if (!Types.ObjectId.isValid(runId)) {
+    res.status(400).json(new ApiResponse(400, null, "Invalid run id"));
+    return null;
+  }
+  const run = await WorkflowRunModel.findOne({ _id: runId, userId: req.user.userId });
+  if (!run) {
+    res.status(404).json(new ApiResponse(404, null, "Run not found"));
+    return null;
+  }
+  return run;
+};
+
+/** Problems that would stop the saved workflow from running, per node, for the canvas to show. */
+export const checkWorkflow = asyncHandler(async (req: Request, res: Response) => {
+  const workflow = await ownWorkflow(req, res);
+  if (!workflow) return;
+  const plan = buildPlan(workflow.nodes, workflow.edges);
+  return res.status(200).json(new ApiResponse(200, plan, "Workflow checked"));
+});
+
+/** Starts a run of the saved workflow with the user's inputs; it continues in the background. */
+export const startWorkflowRun = asyncHandler(async (req: Request, res: Response) => {
+  const workflow = await ownWorkflow(req, res);
+  if (!workflow) return;
+  try {
+    const run = await startRun(workflow, req.user.userId, req.body?.inputs, validTimeZone(req.body?.timeZone));
+    return res.status(202).json(new ApiResponse(202, { run: serializeRun(run) }, "Run started"));
+  } catch (err) {
+    if (err instanceof RunInputError) {
+      return res.status(400).json(new ApiResponse(400, { issues: err.issues }, err.message));
+    }
+    throw err;
+  }
+});
+
+export const getWorkflowRun = asyncHandler(async (req: Request, res: Response) => {
+  const run = await ownRun(req, res);
+  if (!run) return;
+  return res.status(200).json(new ApiResponse(200, { run: serializeRun(run) }, ""));
+});
+
+/** Approve or reject a run waiting at a Human review, or answer an agent's question. */
+export const reviewWorkflowRun = asyncHandler(async (req: Request, res: Response) => {
+  const run = await ownRun(req, res);
+  if (!run) return;
+  try {
+    await reviewRun(run, req.body?.approved === true, req.body?.note);
+    return res.status(200).json(new ApiResponse(200, { run: serializeRun(run) }, "Decision recorded"));
+  } catch (err) {
+    if (err instanceof RunInputError) {
+      return res.status(400).json(new ApiResponse(400, { issues: err.issues }, err.message));
+    }
+    throw err;
+  }
+});
+
+/** The workflow's latest runs, newest first. */
+export const listWorkflowRuns = asyncHandler(async (req: Request, res: Response) => {
+  const workflow = await ownWorkflow(req, res);
+  if (!workflow) return;
+  const limit = Math.min(20, Math.max(1, parseInt(String(req.query.limit || "5"), 10)));
+  const runs = await WorkflowRunModel.find({ workflowId: workflow._id }).sort({ createdAt: -1 }).limit(limit);
+  return res.status(200).json(new ApiResponse(200, { runs: runs.map(serializeRun) }, ""));
 });

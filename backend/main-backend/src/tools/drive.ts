@@ -8,7 +8,14 @@ export interface Tokens {
 }
 
 function getRefreshToken(context: any) {
-  console.log("🔍 Context received:", context);
+  // Chat runs pass the token list itself as context.
+  if (Array.isArray(context)) {
+    const found = context.find((t) => t.service === "drive");
+    if (!found?.refreshToken) {
+      throw new Error("No refresh token for drive service found");
+    }
+    return found.refreshToken;
+  }
 
   // If inside context.drive array
   if (Array.isArray(context.drive)) {

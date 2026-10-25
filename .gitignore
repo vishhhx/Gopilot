@@ -1,1 +1,8 @@
 /unknown.txt
+.agents
+.env
+.env.*
+!.env.example
+
+frontend/.legacy-ui
+skills-lock.json

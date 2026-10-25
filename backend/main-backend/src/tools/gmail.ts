@@ -7,7 +7,6 @@ export interface Tokens {
 }
 
 function getrefresToken(tokens: Tokens[]) {
-  console.log(tokens);
   const res = tokens.filter((token) => token.service === "gmail");
   if (res.length <= 0) {
     throw new Error("no refresh token of the gmail found");
@@ -256,11 +255,22 @@ export const readEmailTool = tool({
 export const sendEmailTool = tool({
   name: "send_email",
   description:
-    "Send a new email. Required: to (string or array of email addresses), subject (string), body (string). Optional: cc (email string or array), bcc (email string or array), isHtml (boolean, default false), attachments (array of objects with filename, content (base64), and mimeType).",
+    "Send a new email. Write HTML (isHtml: true) for anything with structure such as schedules, lists or tables; Gmail renders it formatted. Plain text only for a one-line note.",
   parameters: z.object({
-    to: z.union([z.string().email(), z.array(z.string().email())]),
-    subject: z.string().min(1),
-    body: z.string().min(1),
+    to: z.array(z.string().email()).min(1).describe("Recipient email addresses."),
+    subject: z
+      .string()
+      .min(1)
+      .describe("A specific subject line, e.g. 'Your schedule for Mon 27 Oct'. Never empty."),
+    body: z
+      .string()
+      .min(1)
+      .describe(
+        "The email body. When isHtml is true: an email-safe HTML fragment with inline styles (no <style>, <script> or markdown)."
+      ),
+    isHtml: z.boolean().describe("true when body is HTML."),
+    cc: z.array(z.string().email()).nullable().describe("CC addresses, or null."),
+    bcc: z.array(z.string().email()).nullable().describe("BCC addresses, or null."),
   }),
   execute: async (args: any, runContext?: RunContext<Tokens[]>) => {
     try {
@@ -280,10 +290,9 @@ export const sendEmailTool = tool({
         to: args.to,
         subject: args.subject,
         body: args.body,
-        cc: args.cc,
-        bcc: args.bcc,
+        cc: args.cc ?? undefined,
+        bcc: args.bcc ?? undefined,
         isHtml: args.isHtml ?? false,
-        attachments: args.attachments,
       };
       const result = await gmail.sendEmail(emailData);
 
@@ -359,10 +368,14 @@ export const forwardEmailTool = tool({
 export const replyToEmailTool = tool({
   name: "reply_to_email",
   description:
-    "Reply to an existing email. Automatically handles threading and includes original message references. Required: messageId (string), body (string). Optional: isHtml (boolean, default false), attachments (array with filename, content base64, mimeType).",
+    "Reply to an existing email. Automatically handles threading and includes original message references. Use HTML (isHtml: true) for structured replies.",
   parameters: z.object({
     messageId: z.string().min(1),
-    body: z.string().min(1),
+    body: z
+      .string()
+      .min(1)
+      .describe("The reply body; an email-safe HTML fragment with inline styles when isHtml is true."),
+    isHtml: z.boolean().describe("true when body is HTML."),
   }),
   execute: async (args: any, runContext?: RunContext<Tokens[]>) => {
     try {
@@ -381,7 +394,6 @@ export const replyToEmailTool = tool({
         messageId: args.messageId,
         body: args.body,
         isHtml: args.isHtml ?? false,
-        attachments: args.attachments,
       };
       const result = await gmail.replyToEmail(replyData);
 

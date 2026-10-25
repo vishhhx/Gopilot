@@ -10,15 +10,28 @@ type ThemeProviderProps = {
 
 type ThemeProviderState = {
   theme: Theme;
+  resolvedTheme: "dark" | "light";
   setTheme: (theme: Theme) => void;
 };
 
 const initialState: ThemeProviderState = {
   theme: "system",
+  resolvedTheme: "light",
   setTheme: () => null,
 };
 
 const ThemeProviderContext = createContext<ThemeProviderState>(initialState);
+
+function readStored(key: string): Theme | null {
+  try {
+    return localStorage.getItem(key) as Theme | null;
+  } catch {
+    return null;
+  }
+}
+
+const systemPrefersDark = () =>
+  typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches;
 
 export function ThemeProvider({
   children,
@@ -26,31 +39,36 @@ export function ThemeProvider({
   storageKey = "vite-ui-theme",
   ...props
 }: ThemeProviderProps) {
-  const [theme, setTheme] = useState<Theme>(
-    () => (localStorage.getItem(storageKey) as Theme) || defaultTheme
-  );
+  const [theme, setTheme] = useState<Theme>(() => readStored(storageKey) || defaultTheme);
+  const [systemDark, setSystemDark] = useState<boolean>(systemPrefersDark);
+
+  // follow the OS while the theme is "system"
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = () => setSystemDark(mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+
+  const resolvedTheme: "dark" | "light" =
+    theme === "system" ? (systemDark ? "dark" : "light") : theme;
 
   useEffect(() => {
     const root = window.document.documentElement;
     root.classList.remove("light", "dark");
-
-    if (theme === "system") {
-      const systemTheme = window.matchMedia("(prefers-color-scheme: dark)")
-        .matches
-        ? "dark"
-        : "light";
-      root.classList.add(systemTheme);
-      return;
-    }
-
-    root.classList.add(theme);
-  }, [theme]);
+    root.classList.add(resolvedTheme);
+  }, [resolvedTheme]);
 
   const value = {
     theme,
-    setTheme: (theme: Theme) => {
-      localStorage.setItem(storageKey, theme);
-      setTheme(theme);
+    resolvedTheme,
+    setTheme: (next: Theme) => {
+      try {
+        localStorage.setItem(storageKey, next);
+      } catch {
+        /* storage can be unavailable; the choice still applies for this visit */
+      }
+      setTheme(next);
     },
   };
 

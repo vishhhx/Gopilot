@@ -1,24 +1,161 @@
 import { google } from "googleapis";
+import { drive_v3, forms_v1 } from "googleapis";
 import { ENV } from "../../config";
 
-// Form Agent Service - In-Memory Implementation (No Backend API Calls)
-export class FormAgentService {
+/*
+  Google Forms through the Forms API (forms, questions, responses) and the Drive API (listing,
+  copying and trashing, which the Forms API doesn't do).
+*/
+
+export type QuestionType =
+  | "short_text"
+  | "paragraph"
+  | "multiple_choice"
+  | "checkboxes"
+  | "dropdown"
+  | "linear_scale"
+  | "rating"
+  | "date"
+  | "time";
+
+export interface QuestionInput {
+  title: string;
+  type: QuestionType;
+  required: boolean;
+  description?: string | null;
+  /** choices for multiple_choice, checkboxes and dropdown */
+  options?: string[] | null;
+  /** linear_scale: low (0 or 1) to high (2-10); rating: high is the number of stars (3-10) */
+  scale?: { low: number; high: number; lowLabel?: string | null; highLabel?: string | null } | null;
+}
+
+export interface QuestionSummary {
+  itemId: string;
+  questionId: string | null;
+  title: string;
+  type: string;
+  required: boolean;
+  options: string[] | null;
+}
+
+export interface FormSummary {
+  formId: string;
+  title: string;
+  description: string;
+  /** where the owner edits the form */
+  editUrl: string;
+  /** the link to share with respondents */
+  responderUrl: string | null;
+  isPublished: boolean;
+  isAcceptingResponses: boolean;
+  questionCount: number;
+  questions: QuestionSummary[];
+}
+
+const FORM_MIME = "application/vnd.google-apps.form";
+
+const CHOICE_TYPES = {
+  multiple_choice: "RADIO",
+  checkboxes: "CHECKBOX",
+  dropdown: "DROP_DOWN",
+} as const;
+
+const toQuestion = (q: QuestionInput): forms_v1.Schema$Question => {
+  const required = q.required;
+  switch (q.type) {
+    case "short_text":
+      return { required, textQuestion: { paragraph: false } };
+    case "paragraph":
+      return { required, textQuestion: { paragraph: true } };
+    case "multiple_choice":
+    case "checkboxes":
+    case "dropdown": {
+      const options = [...new Set((q.options ?? []).map((o) => o.trim()).filter(Boolean))];
+      if (options.length === 0) throw new Error(`"${q.title}" is a ${q.type} question and needs options.`);
+      return {
+        required,
+        choiceQuestion: { type: CHOICE_TYPES[q.type], options: options.map((value) => ({ value })) },
+      };
+    }
+    case "linear_scale": {
+      const low = q.scale?.low === 0 ? 0 : 1;
+      const high = Math.min(10, Math.max(2, q.scale?.high ?? 5));
+      return {
+        required,
+        scaleQuestion: {
+          low,
+          high,
+          lowLabel: q.scale?.lowLabel ?? undefined,
+          highLabel: q.scale?.highLabel ?? undefined,
+        },
+      };
+    }
+    case "rating":
+      return {
+        required,
+        ratingQuestion: { ratingScaleLevel: Math.min(10, Math.max(3, q.scale?.high ?? 5)), iconType: "STAR" },
+      };
+    case "date":
+      return { required, dateQuestion: { includeYear: true, includeTime: false } };
+    case "time":
+      return { required, timeQuestion: { duration: false } };
+  }
+};
+
+const questionType = (q: forms_v1.Schema$Question) => {
+  if (q.textQuestion) return q.textQuestion.paragraph ? "paragraph" : "short_text";
+  if (q.choiceQuestion) {
+    const type = q.choiceQuestion.type;
+    return type === "CHECKBOX" ? "checkboxes" : type === "DROP_DOWN" ? "dropdown" : "multiple_choice";
+  }
+  if (q.scaleQuestion) return "linear_scale";
+  if (q.ratingQuestion) return "rating";
+  if (q.dateQuestion) return "date";
+  if (q.timeQuestion) return "time";
+  if (q.fileUploadQuestion) return "file_upload";
+  return "other";
+};
+
+const summarizeForm = (form: forms_v1.Schema$Form): FormSummary => {
+  const questions = (form.items ?? []).flatMap((item): QuestionSummary[] => {
+    const q = item.questionItem?.question;
+    if (!q) return [];
+    return [
+      {
+        itemId: item.itemId!,
+        questionId: q.questionId ?? null,
+        title: item.title ?? "",
+        type: questionType(q),
+        required: Boolean(q.required),
+        options: q.choiceQuestion?.options?.map((o) => o.value ?? "") ?? null,
+      },
+    ];
+  });
+  const state = form.publishSettings?.publishState;
+  return {
+    formId: form.formId!,
+    title: form.info?.title ?? form.info?.documentTitle ?? "Untitled form",
+    description: form.info?.description ?? "",
+    editUrl: `https://docs.google.com/forms/d/${form.formId}/edit`,
+    responderUrl: form.responderUri ?? null,
+    // legacy forms have no publishSettings and are always published
+    isPublished: state ? Boolean(state.isPublished) : true,
+    isAcceptingResponses: state ? Boolean(state.isAcceptingResponses) : true,
+    questionCount: questions.length,
+    questions,
+  };
+};
+
+const answerText = (answer: forms_v1.Schema$Answer | undefined) =>
+  answer?.textAnswers?.answers?.map((a) => a.value ?? "").join(", ") ??
+  (answer?.fileUploadAnswers ? "(file upload)" : "");
+
+export class FormsService {
   private oauth2Client;
-  private googleSheets: any;
-  private backendUrl: string;
-  private frontendUrl: string;
-
-  // ==================== STATIC SHARED STORAGE ====================
-  // Shared across all FormAgentService instances
-  private static sharedFormsStore: Map<string, FormData> = new Map();
-  private static sharedResponsesStore: Map<string, FormResponse[]> = new Map();
-
-  // Reference to shared storage
-  private formsStore: Map<string, FormData>;
-  private responsesStore: Map<string, FormResponse[]>;
+  private forms: forms_v1.Forms;
+  private drive: drive_v3.Drive;
 
   constructor(refreshToken: string) {
-    // ==================== VALIDATE GOOGLE CREDENTIALS ====================
     if (
       !ENV.GOOGLE_CLIENT_ID ||
       !ENV.GOOGLE_CLIENT_SECRET ||
@@ -28,640 +165,251 @@ export class FormAgentService {
         "Google API credentials are missing in environment variables."
       );
     }
-
     if (!refreshToken) {
       throw new Error("No required credentials are provided");
     }
 
-    // ==================== INITIALIZE GOOGLE AUTH ====================
     this.oauth2Client = new google.auth.OAuth2(
       ENV.GOOGLE_CLIENT_ID,
       ENV.GOOGLE_CLIENT_SECRET,
       ENV.GOOGLE_REDIRECT_URI
     );
+    this.oauth2Client.setCredentials({ refresh_token: refreshToken });
 
-    this.oauth2Client.setCredentials({
-      refresh_token: refreshToken,
-    });
-
-    this.googleSheets = google.sheets({
-      version: "v4",
-      auth: this.oauth2Client,
-    });
-
-    // ==================== INITIALIZE URLS ====================
-    this.backendUrl = ENV.BACKEND_URL || "http://localhost:5000";
-    this.frontendUrl = ENV.FRONTEND_URL || "http://localhost:5173";
-
-    // ==================== USE SHARED STORAGE ====================
-    // All instances share the same storage
-    this.formsStore = FormAgentService.sharedFormsStore;
-    this.responsesStore = FormAgentService.sharedResponsesStore;
-
-    console.log("✅ FormAgentService initialized (In-Memory)");
-    console.log(`   Backend URL: ${this.backendUrl}`);
-    console.log(`   Frontend URL: ${this.frontendUrl}`);
-    console.log(`   Shareable Link will be: ${this.frontendUrl}/form/{formId}`);
-    console.log(`   Shared Storage - Forms: ${this.formsStore.size}, Responses: ${this.responsesStore.size}`);
+    this.forms = google.forms({ version: "v1", auth: this.oauth2Client });
+    this.drive = google.drive({ version: "v3", auth: this.oauth2Client });
   }
 
-  // ==================== READ OPERATIONS ====================
-
-  async listForms(options?: {
-    maxResults?: number;
-    pageToken?: string;
-    status?: "active" | "draft" | "archived";
-    sortBy?: "created" | "modified" | "name";
-  }) {
-    try {
-      // Filter forms by status from in-memory store
-      const status = options?.status || "active";
-      const forms = Array.from(this.formsStore.values()).filter(
-        (f) => f.status === status
-      );
-
-      console.log(`📋 Found ${forms.length} ${status} forms in memory`);
-
-      return {
-        forms: forms.slice(0, options?.maxResults || 100),
-        nextPageToken: null,
-        totalResults: forms.length,
-      };
-    } catch (error: any) {
-      console.error("❌ Error listing forms:", error.message);
-      return {
-        forms: [],
-        nextPageToken: null,
-        totalResults: 0,
-      };
-    }
+  private async fetchForm(formId: string) {
+    const { data } = await this.forms.forms.get({ formId });
+    return data;
   }
 
   async getForm(formId: string) {
-    try {
-      const form = this.formsStore.get(formId);
+    return summarizeForm(await this.fetchForm(formId));
+  }
 
-      if (!form) {
-        console.warn(`⚠️  Form not found: ${formId}`);
-        return {
-          id: formId,
-          title: "Form not found",
-          description: "",
-          questions: [],
-          settings: {
-            allowMultipleResponses: false,
-            collectEmails: false,
-            showProgress: false,
-            shuffleQuestions: false,
-          },
-        };
-      }
+  /** Forms in the user's Drive, newest first. */
+  async listForms(options: { maxResults?: number; nameContains?: string | null } = {}) {
+    const q = [`mimeType='${FORM_MIME}'`, "trashed=false"];
+    if (options.nameContains) q.push(`name contains '${options.nameContains.replace(/['\\]/g, "\\$&")}'`);
+    const { data } = await this.drive.files.list({
+      q: q.join(" and "),
+      orderBy: "modifiedTime desc",
+      pageSize: Math.min(100, options.maxResults ?? 20),
+      fields: "files(id,name,modifiedTime,createdTime)",
+    });
+    return (data.files ?? []).map((f) => ({
+      formId: f.id!,
+      title: f.name ?? "Untitled form",
+      modifiedTime: f.modifiedTime ?? null,
+      createdTime: f.createdTime ?? null,
+      editUrl: `https://docs.google.com/forms/d/${f.id}/edit`,
+    }));
+  }
 
-      console.log(`✅ Retrieved form: ${form.title}`);
-      return form;
-    } catch (error: any) {
-      console.error("❌ Error fetching form:", error.message);
-      return {
-        id: formId,
-        title: "Error loading form",
-        description: "",
-        questions: [],
-        settings: {
-          allowMultipleResponses: false,
-          collectEmails: false,
-          showProgress: false,
-          shuffleQuestions: false,
+  /**
+   * Creates the form, adds the questions, and publishes it so the responder link works.
+   * Forms created through the API after 30 June 2026 start unpublished.
+   */
+  async createForm(options: { title: string; description?: string | null; questions: QuestionInput[] }) {
+    const { data } = await this.forms.forms.create({
+      requestBody: { info: { title: options.title, documentTitle: options.title } },
+    });
+    const formId = data.formId!;
+
+    const requests: forms_v1.Schema$Request[] = [];
+    if (options.description) {
+      requests.push({ updateFormInfo: { info: { description: options.description }, updateMask: "description" } });
+    }
+    options.questions.forEach((q, index) => requests.push(this.createItemRequest(q, index)));
+    if (requests.length) {
+      await this.forms.forms.batchUpdate({ formId, requestBody: { requests } });
+    }
+
+    await this.setPublishState(formId, { isPublished: true, isAcceptingResponses: true });
+    return this.getForm(formId);
+  }
+
+  private createItemRequest(q: QuestionInput, index: number): forms_v1.Schema$Request {
+    return {
+      createItem: {
+        item: {
+          title: q.title,
+          description: q.description ?? undefined,
+          questionItem: { question: toQuestion(q) },
         },
-      };
-    }
-  }
-
-  async listResponses(
-    formId: string,
-    options?: {
-      maxResults?: number;
-      pageToken?: string;
-      filter?: string;
-      sortBy?: "newest" | "oldest";
-    }
-  ) {
-    try {
-      const responses = this.responsesStore.get(formId) || [];
-
-      console.log(`✅ Retrieved ${responses.length} responses for form ${formId}`);
-
-      return {
-        responses: responses.slice(0, options?.maxResults || 100),
-        nextPageToken: null,
-        totalResults: responses.length,
-      };
-    } catch (error: any) {
-      console.error("❌ Error fetching responses:", error.message);
-      return {
-        responses: [],
-        nextPageToken: null,
-        totalResults: 0,
-      };
-    }
-  }
-
-  async getResponse(formId: string, responseId: string) {
-    try {
-      const responses = this.responsesStore.get(formId) || [];
-      const response = responses.find((r) => r.id === responseId);
-
-      if (!response) {
-        console.warn(`⚠️  Response not found: ${responseId}`);
-        return null;
-      }
-
-      console.log(`✅ Retrieved response: ${responseId}`);
-      return response;
-    } catch (error: any) {
-      console.error("❌ Error fetching response:", error.message);
-      return null;
-    }
-  }
-
-  async exportResponses(formId: string, format: "json" | "csv" = "csv") {
-    try {
-      const responses = this.responsesStore.get(formId) || [];
-
-      console.log(`📤 Exporting ${responses.length} responses as ${format}`);
-
-      return {
-        format,
-        data: responses,
-        exportedAt: new Date(),
-      };
-    } catch (error: any) {
-      console.error("❌ Error exporting responses:", error.message);
-      return {
-        format,
-        data: [],
-        exportedAt: new Date(),
-      };
-    }
-  }
-
-  // ==================== WRITE OPERATIONS ====================
-
-  async createForm(options: {
-    title: string;
-    description?: string;
-    questions: FormQuestion[];
-    settings?: Partial<FormSettings>;
-  }) {
-    const formId = this.generateId();
-    const form: FormData = {
-      id: formId,
-      title: options.title,
-      description: options.description || "",
-      questions: options.questions,
-      settings: {
-        allowMultipleResponses: false,
-        collectEmails: false,
-        showProgress: false,
-        shuffleQuestions: false,
-        ...options.settings,
+        location: { index },
       },
-      status: "active",
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      shareableLink: this.generateShareableLink(formId),
-      embedCode: this.generateEmbedCode(formId),
-      shortLink: this.generateShortLink(formId),
     };
+  }
 
-    // Store in memory
-    this.formsStore.set(formId, form);
-    this.responsesStore.set(formId, []);
+  /** Adds questions at `position` (0-based), or at the end. */
+  async addQuestions(formId: string, questions: QuestionInput[], position?: number | null) {
+    const form = await this.fetchForm(formId);
+    const start = Math.min(position ?? Infinity, form.items?.length ?? 0);
+    await this.forms.forms.batchUpdate({
+      formId,
+      requestBody: { requests: questions.map((q, i) => this.createItemRequest(q, start + i)) },
+    });
+    return this.getForm(formId);
+  }
 
-    console.log(`✅ Form created in memory: ${form.id}`);
-    console.log(`   Title: ${form.title}`);
-    console.log(`   Questions: ${form.questions.length}`);
+  async updateQuestion(
+    formId: string,
+    itemId: string,
+    changes: { title?: string | null; description?: string | null; required?: boolean | null; options?: string[] | null }
+  ) {
+    const form = await this.fetchForm(formId);
+    const index = (form.items ?? []).findIndex((i) => i.itemId === itemId);
+    const item = form.items?.[index];
+    const question = item?.questionItem?.question;
+    if (!item || !question) throw new Error(`No question with itemId ${itemId} in this form.`);
 
+    const mask: string[] = [];
+    const updated: forms_v1.Schema$Item = { itemId, questionItem: { question: { ...question } } };
+    if (changes.title != null) {
+      updated.title = changes.title;
+      mask.push("title");
+    }
+    if (changes.description != null) {
+      updated.description = changes.description;
+      mask.push("description");
+    }
+    if (changes.required != null) {
+      updated.questionItem!.question!.required = changes.required;
+      mask.push("questionItem.question.required");
+    }
+    if (changes.options != null) {
+      if (!question.choiceQuestion) throw new Error("Only multiple choice, checkbox and dropdown questions have options.");
+      updated.questionItem!.question!.choiceQuestion = {
+        type: question.choiceQuestion.type,
+        options: changes.options.map((value) => ({ value })),
+      };
+      mask.push("questionItem.question.choiceQuestion");
+    }
+    if (mask.length === 0) throw new Error("Nothing to change: give a title, description, required or options.");
+
+    await this.forms.forms.batchUpdate({
+      formId,
+      requestBody: { requests: [{ updateItem: { item: updated, location: { index }, updateMask: mask.join(",") } }] },
+    });
+    return this.getForm(formId);
+  }
+
+  async deleteQuestion(formId: string, itemId: string) {
+    const form = await this.fetchForm(formId);
+    const index = (form.items ?? []).findIndex((i) => i.itemId === itemId);
+    if (index === -1) throw new Error(`No question with itemId ${itemId} in this form.`);
+    await this.forms.forms.batchUpdate({
+      formId,
+      requestBody: { requests: [{ deleteItem: { location: { index } } }] },
+    });
+    return this.getForm(formId);
+  }
+
+  async updateInfo(formId: string, changes: { title?: string | null; description?: string | null }) {
+    const info: forms_v1.Schema$Info = {};
+    const mask: string[] = [];
+    if (changes.title != null) {
+      info.title = changes.title;
+      mask.push("title");
+    }
+    if (changes.description != null) {
+      info.description = changes.description;
+      mask.push("description");
+    }
+    if (mask.length === 0) throw new Error("Nothing to change: give a title or description.");
+    await this.forms.forms.batchUpdate({
+      formId,
+      requestBody: { requests: [{ updateFormInfo: { info, updateMask: mask.join(",") } }] },
+    });
+    return this.getForm(formId);
+  }
+
+  async setPublishState(formId: string, state: { isPublished: boolean; isAcceptingResponses: boolean }) {
+    await this.forms.forms.setPublishSettings({
+      formId,
+      requestBody: {
+        publishSettings: { publishState: state },
+        updateMask: "publishState",
+      },
+    });
+  }
+
+  private async fetchResponses(formId: string, max: number) {
+    const responses: forms_v1.Schema$FormResponse[] = [];
+    let pageToken: string | undefined;
+    do {
+      const { data } = await this.forms.forms.responses.list({
+        formId,
+        pageSize: Math.min(5000, max - responses.length),
+        pageToken,
+      });
+      responses.push(...(data.responses ?? []));
+      pageToken = data.nextPageToken ?? undefined;
+    } while (pageToken && responses.length < max);
+    return responses;
+  }
+
+  /** Responses with each answer labelled by its question, newest first. */
+  async listResponses(formId: string, limit = 20) {
+    const [form, responses] = await Promise.all([this.getForm(formId), this.fetchResponses(formId, 1000)]);
+    const sorted = responses.sort((a, b) => (b.lastSubmittedTime ?? "").localeCompare(a.lastSubmittedTime ?? ""));
+    return {
+      form,
+      totalResponses: responses.length,
+      responses: sorted.slice(0, limit).map((r) => ({
+        responseId: r.responseId,
+        submittedAt: r.lastSubmittedTime,
+        respondentEmail: r.respondentEmail ?? null,
+        answers: form.questions.map((q) => ({
+          question: q.title,
+          answer: q.questionId ? answerText(r.answers?.[q.questionId]) : "",
+        })),
+      })),
+    };
+  }
+
+  /** Per-question results: counts for choice/scale/rating questions, a few samples for text. */
+  async summarizeResponses(formId: string) {
+    const [form, responses] = await Promise.all([this.getForm(formId), this.fetchResponses(formId, 5000)]);
+    const questions = form.questions.map((q) => {
+      const answers = responses
+        .map((r) => (q.questionId ? r.answers?.[q.questionId]?.textAnswers?.answers ?? [] : []))
+        .filter((a) => a.length > 0);
+      const values = answers.flat().map((a) => a.value ?? "");
+      const counted = ["multiple_choice", "checkboxes", "dropdown", "linear_scale", "rating"].includes(q.type);
+      const numeric = values.map(Number).filter((n) => !Number.isNaN(n));
+      return {
+        question: q.title,
+        type: q.type,
+        answered: answers.length,
+        ...(counted && {
+          counts: values.reduce<Record<string, number>>((acc, v) => ({ ...acc, [v]: (acc[v] ?? 0) + 1 }), {}),
+        }),
+        ...((q.type === "linear_scale" || q.type === "rating") &&
+          numeric.length > 0 && { average: Number((numeric.reduce((s, n) => s + n, 0) / numeric.length).toFixed(2)) }),
+        ...(!counted && { samples: values.slice(0, 5) }),
+      };
+    });
+    return { form, totalResponses: responses.length, questions };
+  }
+
+  async duplicateForm(formId: string, title: string) {
+    const { data } = await this.drive.files.copy({
+      fileId: formId,
+      requestBody: { name: title },
+      fields: "id",
+    });
+    await this.setPublishState(data.id!, { isPublished: true, isAcceptingResponses: true });
+    return this.getForm(data.id!);
+  }
+
+  /** Moves the form to Drive trash; it can be restored from there for 30 days. */
+  async trashForm(formId: string) {
+    const form = await this.getForm(formId);
+    await this.drive.files.update({ fileId: formId, requestBody: { trashed: true } });
     return form;
   }
-
-  async submitResponse(
-    formId: string,
-    options: {
-      answers: FormAnswer[];
-      responderEmail?: string;
-      metadata?: {
-        ipAddress?: string;
-        userAgent?: string;
-        submittedAt?: Date;
-      };
-    }
-  ) {
-    try {
-      // Check if form exists
-      if (!this.formsStore.has(formId)) {
-        throw new Error(`Form ${formId} not found`);
-      }
-
-      const response: FormResponse = {
-        id: this.generateId(),
-        formId,
-        answers: options.answers,
-        responderEmail: options.responderEmail,
-        metadata: {
-          ipAddress: options.metadata?.ipAddress,
-          userAgent: options.metadata?.userAgent,
-          submittedAt: options.metadata?.submittedAt || new Date(),
-        },
-        status: "submitted",
-      };
-
-      // Store response in memory
-      if (!this.responsesStore.has(formId)) {
-        this.responsesStore.set(formId, []);
-      }
-      this.responsesStore.get(formId)!.push(response);
-
-      console.log(`✅ Response submitted: ${response.id}`);
-
-      return response;
-    } catch (error: any) {
-      console.error("❌ Error submitting response:", error.message);
-      throw error;
-    }
-  }
-
-  async updateForm(formId: string, updates: Partial<FormData>) {
-    try {
-      const form = this.formsStore.get(formId);
-
-      if (!form) {
-        throw new Error(`Form ${formId} not found`);
-      }
-
-      const updatedForm = {
-        ...form,
-        ...updates,
-        updatedAt: new Date(),
-      };
-
-      this.formsStore.set(formId, updatedForm);
-
-      console.log(`✅ Form updated: ${formId}`);
-
-      return updatedForm;
-    } catch (error: any) {
-      console.error("❌ Error updating form:", error.message);
-      throw error;
-    }
-  }
-
-  async duplicateForm(formId: string, newTitle: string) {
-    try {
-      const originalForm = await this.getForm(formId);
-
-      if (!originalForm || originalForm.title === "Form not found") {
-        throw new Error(`Form ${formId} not found`);
-      }
-
-      return this.createForm({
-        title: newTitle,
-        description: originalForm.description,
-        questions: originalForm.questions,
-        settings: originalForm.settings,
-      });
-    } catch (error: any) {
-      console.error("❌ Error duplicating form:", error.message);
-      throw error;
-    }
-  }
-
-  // ==================== FORM LOGIC OPERATIONS ====================
-
-  async addQuestion(formId: string, question: FormQuestion) {
-    try {
-      const form = await this.getForm(formId);
-
-      if (!form || form.title === "Form not found") {
-        throw new Error(`Form ${formId} not found`);
-      }
-
-      form.questions.push(question);
-      return this.updateForm(formId, { questions: form.questions });
-    } catch (error: any) {
-      console.error("❌ Error adding question:", error.message);
-      throw error;
-    }
-  }
-
-  async removeQuestion(formId: string, questionId: string) {
-    try {
-      const form = await this.getForm(formId);
-
-      if (!form || form.title === "Form not found") {
-        throw new Error(`Form ${formId} not found`);
-      }
-
-      form.questions = form.questions.filter((q) => q.id !== questionId);
-      return this.updateForm(formId, { questions: form.questions });
-    } catch (error: any) {
-      console.error("❌ Error removing question:", error.message);
-      throw error;
-    }
-  }
-
-  async reorderQuestions(formId: string, questionIds: string[]) {
-    try {
-      const form = await this.getForm(formId);
-
-      if (!form || form.title === "Form not found") {
-        throw new Error(`Form ${formId} not found`);
-      }
-
-      const questionMap = new Map(form.questions.map((q) => [q.id, q]));
-      const reorderedQuestions = questionIds
-        .map((id) => questionMap.get(id))
-        .filter((q) => q !== undefined) as FormQuestion[];
-
-      return this.updateForm(formId, { questions: reorderedQuestions });
-    } catch (error: any) {
-      console.error("❌ Error reordering questions:", error.message);
-      throw error;
-    }
-  }
-
-  async validateResponse(
-    formId: string,
-    response: FormResponse
-  ): Promise<{
-    isValid: boolean;
-    errors: string[];
-  }> {
-    try {
-      const form = await this.getForm(formId);
-      const errors: string[] = [];
-
-      if (!form || form.title === "Form not found") {
-        return {
-          isValid: false,
-          errors: [`Form ${formId} not found`],
-        };
-      }
-
-      for (const question of form.questions) {
-        if (question.required) {
-          const answer = response.answers.find(
-            (a) => a.questionId === question.id
-          );
-          if (!answer || !answer.value) {
-            errors.push(`Question "${question.title}" is required`);
-          }
-        }
-      }
-
-      return {
-        isValid: errors.length === 0,
-        errors,
-      };
-    } catch (error: any) {
-      console.error("❌ Error validating response:", error.message);
-      return {
-        isValid: false,
-        errors: [error.message],
-      };
-    }
-  }
-
-  // ==================== DELETE/ARCHIVE OPERATIONS ====================
-
-  async deleteForm(formId: string) {
-    try {
-      if (!this.formsStore.has(formId)) {
-        throw new Error(`Form ${formId} not found`);
-      }
-
-      this.formsStore.delete(formId);
-      this.responsesStore.delete(formId);
-
-      console.log(`✅ Form deleted: ${formId}`);
-
-      return { success: true };
-    } catch (error: any) {
-      console.error("❌ Error deleting form:", error.message);
-      throw error;
-    }
-  }
-
-  async archiveForm(formId: string) {
-    try {
-      return this.updateForm(formId, { status: "archived" });
-    } catch (error: any) {
-      console.error("❌ Error archiving form:", error.message);
-      throw error;
-    }
-  }
-
-  async clearResponses(formId: string) {
-    try {
-      if (!this.formsStore.has(formId)) {
-        throw new Error(`Form ${formId} not found`);
-      }
-
-      const count = this.responsesStore.get(formId)?.length || 0;
-      this.responsesStore.set(formId, []);
-
-      console.log(`✅ Cleared ${count} responses for form: ${formId}`);
-
-      return { success: true, message: "All responses cleared" };
-    } catch (error: any) {
-      console.error("❌ Error clearing responses:", error.message);
-      throw error;
-    }
-  }
-
-  async deleteResponse(formId: string, responseId: string) {
-    try {
-      const responses = this.responsesStore.get(formId) || [];
-      const filtered = responses.filter((r) => r.id !== responseId);
-      this.responsesStore.set(formId, filtered);
-
-      console.log(`✅ Response deleted: ${responseId}`);
-
-      return { success: true };
-    } catch (error: any) {
-      console.error("❌ Error deleting response:", error.message);
-      throw error;
-    }
-  }
-
-  // ==================== ADVANCED FEATURES ====================
-
-  async enableResponseNotification(
-    formId: string,
-    notificationEmail: string
-  ) {
-    try {
-      return this.updateForm(formId, {
-        notifications: {
-          email: notificationEmail,
-          enabled: true,
-        } as any,
-      });
-    } catch (error: any) {
-      console.error("❌ Error enabling notifications:", error.message);
-      throw error;
-    }
-  }
-
-  async setFormExpiration(formId: string, expiryDate: Date) {
-    try {
-      return this.updateForm(formId, { expiresAt: expiryDate } as any);
-    } catch (error: any) {
-      console.error("❌ Error setting expiration:", error.message);
-      throw error;
-    }
-  }
-
-  async syncToGoogleSheets(formId: string, spreadsheetId: string) {
-    try {
-      const responses = this.responsesStore.get(formId) || [];
-      const values = responses.map((r) => [
-        r.id,
-        r.responderEmail,
-        JSON.stringify(r.answers),
-        r.metadata?.submittedAt,
-      ]);
-
-      await this.googleSheets.spreadsheets.values.append({
-        spreadsheetId,
-        range: "Sheet1!A1",
-        valueInputOption: "USER_ENTERED",
-        requestBody: { values },
-      });
-
-      console.log(`✅ Synced ${responses.length} responses to Google Sheets`);
-
-      return { synced: true, count: responses.length };
-    } catch (error: any) {
-      console.error("❌ Error syncing to sheets:", error.message);
-      throw error;
-    }
-  }
-
-  async generateAnalytics(formId: string) {
-    try {
-      const responses = this.responsesStore.get(formId) || [];
-
-      console.log(`📊 Generated analytics for form: ${formId}`);
-
-      return {
-        totalResponses: responses.length,
-        completionRate: 100,
-        averageTimeToComplete: 0,
-        responsesByDay: [],
-        questionAnalytics: [],
-      };
-    } catch (error: any) {
-      console.error("❌ Error generating analytics:", error.message);
-      throw error;
-    }
-  }
-
-  // ==================== UTILITIES ====================
-
-  private generateId(): string {
-    return `form_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  }
-
-  private generateShareableLink(formId: string): string {
-    if (!this.frontendUrl || this.frontendUrl === "undefined") {
-      console.warn("⚠️  Frontend URL is undefined, using fallback");
-      return `http://localhost:5173/form/${formId}`;
-    }
-    return `${this.frontendUrl}/form/${formId}`;
-  }
-
-  private generateShortLink(formId: string): string {
-    const shortId = formId.split("_")[2];
-    if (!this.frontendUrl || this.frontendUrl === "undefined") {
-      console.warn("⚠️  Frontend URL is undefined, using fallback");
-      return `http://localhost:5173/f/${shortId}`;
-    }
-    return `${this.frontendUrl}/f/${shortId}`;
-  }
-
-  private generateEmbedCode(formId: string): string {
-    return `<iframe src="${this.generateShareableLink(
-      formId
-    )}" width="100%" height="800" frameborder="0"></iframe>`;
-  }
-
-  getBackendUrl(): string {
-    return this.backendUrl;
-  }
-
-  getFrontendUrl(): string {
-    return this.frontendUrl;
-  }
-}
-
-// ==================== TYPE DEFINITIONS ====================
-
-interface FormQuestion {
-  id: string;
-  title: string;
-  type:
-    | "shortText"
-    | "longText"
-    | "multipleChoice"
-    | "checkbox"
-    | "dropdown"
-    | "rating"
-    | "date";
-  required: boolean;
-  options?: string[];
-  placeholder?: string;
-  description?: string;
-}
-
-interface FormAnswer {
-  questionId: string;
-  value: string | string[] | number;
-}
-
-interface FormResponse {
-  id: string;
-  formId: string;
-  answers: FormAnswer[];
-  responderEmail?: string;
-  metadata?: {
-    ipAddress?: string;
-    userAgent?: string;
-    submittedAt?: Date;
-  };
-  status: "submitted" | "draft" | "incomplete";
-}
-
-interface FormSettings {
-  allowMultipleResponses: boolean;
-  collectEmails: boolean;
-  showProgress: boolean;
-  shuffleQuestions: boolean;
-  notifications?: {
-    email: string;
-    enabled: boolean;
-  };
-  expiresAt?: Date;
-}
-
-interface FormData extends FormSettings {
-  id: string;
-  title: string;
-  description: string;
-  questions: FormQuestion[];
-  status?: "active" | "draft" | "archived";
-  createdAt: Date;
-  updatedAt: Date;
-  shareableLink?: string;
-  embedCode?: string;
-  shortLink?: string;
 }

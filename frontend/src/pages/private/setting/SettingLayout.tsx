@@ -1,14 +1,14 @@
-"use client";
-
-import { SettingSidebar } from "@/components/nav/SettingSidebar";
 import { Outlet } from "react-router-dom";
+import { SettingSidebar } from "@/components/nav/SettingSidebar";
 
 export default function SettingLayout() {
   return (
-    <div className="w-full h-full flex gap-5 ">
-      <SettingSidebar />
-      <div className="flex-1 py-10 pr-10">
-        <Outlet />
+    <div className="h-full overflow-y-auto">
+      <div className="mx-auto flex w-full max-w-[1080px] flex-col gap-8 px-5 pt-10 pb-16 sm:px-8 sm:pt-14 md:flex-row md:gap-12">
+        <SettingSidebar />
+        <div className="min-w-0 flex-1">
+          <Outlet />
+        </div>
       </div>
     </div>
   );

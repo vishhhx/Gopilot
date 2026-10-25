@@ -1,3 +1,4 @@
+import { calendar } from "googleapis/build/src/apis/calendar";
 import {
   gmailDeleteAgent,
   gmailReaderAgent,
@@ -11,6 +12,17 @@ import {
   sheetsStructureAgent,
   sheetsWriterAgent,
 } from "../agents/sheet";
+import {
+  calendarDeleteAgent,
+  calendarReaderAgent,
+  calendarWriterAgent,
+} from "../agents/calender";
+import {
+  meetCreatorAgent,
+  meetDeleteAgent,
+  meetEditorAgent,
+  meetReaderAgent,
+} from "../agents/meet";
 
 interface NodeData {
   service?: string;
@@ -86,7 +98,7 @@ interface AgentContext {
   totalStages: number;
   agentRole?: string;
   taskDescription?: string;
-  service?: string; 
+  service?: string;
 }
 
 const ServiceToAgentMap = {
@@ -102,6 +114,17 @@ const ServiceToAgentMap = {
     sheetsFormattingAgent,
     sheetsManagementAgent,
     sheetsStructureAgent,
+  },
+  calendar: {
+    calendarDeleteAgent,
+    calendarWriterAgent,
+    calendarReaderAgent,
+  },
+  meet: {
+    meetDeleteAgent,
+    meetEditorAgent,
+    meetReaderAgent,
+    meetCreatorAgent,
   },
 } as const;
 

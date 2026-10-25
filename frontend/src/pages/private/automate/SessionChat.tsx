@@ -1,223 +1,172 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { ArrowDown } from "lucide-react";
 import { axiosInstance } from "@/utils";
-import { useEffect, useState, useRef } from "react";
-import { useParams } from "react-router-dom";
 import ChatInput from "@/components/chat/ChatInput";
 import ErrorState from "@/components/Other/common/ErrorState";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Mail, User, Bot, Calendar, Tag, AlertCircle } from "lucide-react";
+import { AgentMessage, ErrorMessage, UserMessage } from "@/components/chat/Messages";
+import { LiveReply } from "@/components/chat/LiveReply";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ScrollArea } from "@/components/ui/scroll-area";
-
-// ... [Interfaces remain exactly the same] ...
-interface DynamicContent {
-  type: string;
-  title: string;
-  url: string | null;
-  metadata: {
-    emailId: string;
-    threadId: string;
-    from: string;
-    to: string[];
-    subject: string;
-    date: string;
-    snippet?: string;
-    labels?: string[];
-    hasAttachments?: boolean;
-    operation: string;
-  };
-  data?: {
-    body?: string;
-    attachments?: any[];
-  };
-}
-
-interface Message {
-  messageId: string;
-  sender: "user" | "agent" | "system";
-  agentName?: string;
-  content: string;
-  isDynamic: boolean;
-  dynamicContent?: DynamicContent[];
-  timestamp: string;
-  metadata?: any;
-  isError?: boolean;
-}
-
-interface SessionData {
-  _id: string;
-  sessionId: string;
-  conversation: Message[];
-  status: string;
-  createdAt: string;
-  updatedAt: string;
-}
+import { useAppDispatch } from "@/store/hooks";
+import { setSessionTitle } from "@/store/slices/sessionSlice";
+import {
+  normalizeMessage,
+  replyToMessage,
+  sessionTitle,
+  type ChatMessage,
+  type SessionData,
+} from "@/lib/chat";
+import { errorMessage, formatDate } from "@/lib/format";
+import { streamChat, type AgentStep } from "@/lib/stream";
+import { workflowApi, type WorkflowSummary } from "@/lib/workflow";
+import { WorkflowPicker } from "@/components/chat/WorkflowPicker";
 
 function SessionChat() {
-  const { sessionId } = useParams();
+  const { sessionId } = useParams<{ sessionId: string }>();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const dispatch = useAppDispatch();
+
   const [session, setSession] = useState<SessionData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [sendError, setSendError] = useState<string | null>(null);
+  const [atBottom, setAtBottom] = useState(true);
+  const [liveSteps, setLiveSteps] = useState<AgentStep[]>([]);
+  const [liveText, setLiveText] = useState("");
+  const [pickerOpen, setPickerOpen] = useState(false);
 
-  // 1. Use a ref specifically for the bottom of the list
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const sentInitial = useRef<string | null>(null);
+  const initialPrompt = (location.state as { initialPrompt?: string } | null)?.initialPrompt;
 
-  const getSession = async () => {
+  const getSession = useCallback(async () => {
+    if (!sessionId) return;
     try {
       setIsLoading(true);
       setError(null);
       const { data } = await axiosInstance.get(`/session/${sessionId}`);
-      setSession(data.data);
-    } catch (err: any) {
-      console.error("Error fetching session:", err);
-      setError(
-        err?.response?.data?.message ||
-          err?.message ||
-          "Failed to load chat session"
-      );
+      const raw = data.data;
+      const conversation = ((raw?.conversation ?? []) as Record<string, unknown>[]).map(normalizeMessage);
+      setSession({ ...raw, conversation });
+      const title = raw?.title || sessionTitle(conversation);
+      if (title) dispatch(setSessionTitle({ sessionId, title }));
+    } catch (err) {
+      setError(errorMessage(err, "Failed to load this task"));
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const handleSendMessage = async (message: string) => {
-    if (!sessionId) return;
-
-    setSendError(null);
-
-    const userMessage: Message = {
-      messageId: Date.now().toString(),
-      sender: "user",
-      content: message,
-      isDynamic: false,
-      timestamp: new Date().toISOString(),
-    };
-
-    setSession((prev) =>
-      prev
-        ? {
-            ...prev,
-            conversation: [...prev.conversation, userMessage],
-          }
-        : null
-    );
-
-    try {
-      setIsSending(true);
-      const { data } = await axiosInstance.post(`/agent/chat/${sessionId}`, {
-        message,
-      });
-
-      const result = data.data.result;
-
-      const agentMessage: Message = {
-        messageId: (Date.now() + 1).toString(),
-        sender: "agent",
-        agentName: "orchestrator",
-        content:
-          typeof result === "string"
-            ? result
-            : result.content || JSON.stringify(result),
-        isDynamic: typeof result === "object" && result.isDynamic,
-        dynamicContent:
-          typeof result === "object" ? result.dynamicContent : undefined,
-        timestamp: new Date().toISOString(),
-      };
-
-      setSession((prev) =>
-        prev
-          ? {
-              ...prev,
-              conversation: [...prev.conversation, agentMessage],
-            }
-          : null
-      );
-    } catch (err: any) {
-      console.error("Error sending message:", err);
-      const errorMessage =
-        err?.response?.data?.message ||
-        err?.message ||
-        "Failed to send message";
-      setSendError(errorMessage);
-
-      const errorMsg: Message = {
-        messageId: (Date.now() + 2).toString(),
-        sender: "system",
-        content: `Error: ${errorMessage}`,
-        isDynamic: false,
-        timestamp: new Date().toISOString(),
-        isError: true,
-      };
-
-      setSession((prev) =>
-        prev
-          ? {
-              ...prev,
-              conversation: [...prev.conversation, errorMsg],
-            }
-          : null
-      );
-    } finally {
-      setIsSending(false);
-    }
-  };
+  }, [sessionId, dispatch]);
 
   useEffect(() => {
     getSession();
-  }, [sessionId]);
+  }, [getSession]);
 
-  // 2. Improved Auto-scroll logic
-  // Simply scroll the "bottomRef" into view whenever conversation changes or loading starts
-  useEffect(() => {
-    if (bottomRef.current) {
-      bottomRef.current.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [session?.conversation.length, isSending]);
+  const append = (msg: ChatMessage) =>
+    setSession((prev) => (prev ? { ...prev, conversation: [...prev.conversation, msg] } : prev));
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleString("en-US", {
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
+  const handleSendMessage = useCallback(
+    async (message: string) => {
+      if (!sessionId) return;
+      append({
+        messageId: `u-${Date.now()}`,
+        sender: "user",
+        content: message,
+        isDynamic: false,
+        dynamicContent: [],
+        timestamp: new Date().toISOString(),
+      });
+      setLiveSteps([]);
+      setLiveText("");
+      let streamed = "";
+      try {
+        setIsSending(true);
+        await streamChat(sessionId, message, {
+          onStep: (step) => {
+            // text written before a tool call is the model thinking aloud, not the answer
+            streamed = "";
+            setLiveText("");
+            setLiveSteps((prev) =>
+              prev.some((s) => s.id === step.id)
+                ? prev.map((s) => (s.id === step.id ? { ...s, status: step.status } : s))
+                : [...prev, { tool: "", service: null, ...step }]
+            );
+          },
+          onDelta: (text) => {
+            streamed += text;
+            setLiveText(streamed);
+          },
+          onDone: (result) => {
+            // the text was already read as it streamed, so only replay the reveal if nothing streamed
+            append({ ...replyToMessage(result), fresh: !streamed });
+          },
+        });
+      } catch (err) {
+        append({
+          messageId: `e-${Date.now()}`,
+          sender: "system",
+          content: errorMessage(err, "The agents couldn't finish this request."),
+          isDynamic: false,
+          dynamicContent: [],
+          timestamp: new Date().toISOString(),
+          isError: true,
+          retryPrompt: message,
+        });
+      } finally {
+        setIsSending(false);
+        setLiveSteps([]);
+        setLiveText("");
+      }
+    },
+    [sessionId]
+  );
+
+  const runWorkflow = async (wf: WorkflowSummary, values: Record<string, string>) => {
+    if (!sessionId) return;
+    const { result } = await workflowApi.runInChat(sessionId, wf._id, values);
+    append({
+      messageId: `u-${Date.now()}`,
+      sender: "user",
+      content: `Run the workflow "${wf.title || "Untitled workflow"}"`,
+      isDynamic: false,
+      dynamicContent: [],
+      timestamp: new Date().toISOString(),
     });
+    append(replyToMessage(result));
   };
 
-  const getOperationColor = (operation: string) => {
-    const colors: {
-      [key: string]: "default" | "secondary" | "destructive" | "outline";
-    } = {
-      read: "default",
-      sent: "secondary",
-      deleted: "destructive",
-      archived: "outline",
-      trashed: "outline",
-      forwarded: "secondary",
-      replied: "secondary",
-      marked_as_spam: "destructive",
-    };
-    return colors[operation] || "default";
+  // A task started from "New task" arrives with its first prompt; send it once, then drop it from history.
+  useEffect(() => {
+    if (!session || !initialPrompt || !sessionId || sentInitial.current === sessionId) return;
+    sentInitial.current = sessionId;
+    navigate(location.pathname, { replace: true, state: null });
+    void handleSendMessage(initialPrompt);
+  }, [session, initialPrompt, sessionId, navigate, location.pathname, handleSendMessage]);
+
+  // keep the newest message in view while the reader is at the bottom
+  const count = session?.conversation.length ?? 0;
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el && atBottom) el.scrollTo({ top: el.scrollHeight, behavior: count > 1 ? "smooth" : "auto" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [count, isSending, liveSteps.length, liveText]);
+
+  const onScroll = () => {
+    const el = scrollRef.current;
+    if (el) setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 120);
   };
 
-  if (isLoading) {
+  if (isLoading && !session) {
     return (
-      <div className="h-screen flex flex-col">
-        <div className="flex-1 p-4 space-y-4 max-w-4xl mx-auto w-full">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="flex gap-3">
-              <Skeleton className="h-10 w-10 rounded-full flex-shrink-0" />
-              <div className="flex-1 space-y-2">
-                <Skeleton className="h-4 w-[200px]" />
-                <Skeleton className="h-20 w-full" />
-              </div>
-            </div>
-          ))}
+      <div className="mx-auto w-full max-w-[760px] space-y-8 px-5 pt-12">
+        <Skeleton className="ml-auto h-11 w-2/3 rounded-[22px]" />
+        <div className="flex gap-4">
+          <Skeleton className="size-7 rounded-full" />
+          <div className="flex-1 space-y-2.5">
+            <Skeleton className="h-4 w-11/12" />
+            <Skeleton className="h-4 w-4/5" />
+            <Skeleton className="h-28 w-full rounded-[20px]" />
+          </div>
         </div>
       </div>
     );
@@ -225,15 +174,7 @@ function SessionChat() {
 
   if (error) {
     return (
-      <ErrorState
-        type="default"
-        title="Failed to Load Chat"
-        description={error}
-        onRetry={getSession}
-        showRetryButton={true}
-        fullHeight={true}
-        centered={true}
-      />
+      <ErrorState type="default" title="This task didn't load" description={error} onRetry={getSession} showRetryButton fullHeight centered />
     );
   }
 
@@ -241,183 +182,66 @@ function SessionChat() {
     return (
       <ErrorState
         type="notFound"
-        title="Session Not Found"
-        description="The chat session you're looking for doesn't exist or has been deleted."
+        title="Task not found"
+        description="It may have been deleted, or the link is from another account."
         showRetryButton={false}
-        fullHeight={true}
-        centered={true}
+        fullHeight
+        centered
       />
     );
   }
 
+  const title = session.title || sessionTitle(session.conversation) || "New task";
+
   return (
-    <div className="h-full flex flex-col overflow-hidden bg-background">
-      {/* 3. CHANGED: Use flex-1 instead of h-10/12 to perfectly fill available space */}
-      <ScrollArea className="h-9/12 p-4">
-        <div className="max-w-4xl mx-auto space-y-6 pb-4">
-          {sendError && (
-            <Alert variant="destructive">
-              <AlertCircle className="h-4 w-4" />
-              <AlertDescription>{sendError}</AlertDescription>
-            </Alert>
+    <div className="relative flex h-full flex-col bg-paper">
+      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-line/70 px-5">
+        <h1 className="min-w-0 flex-1 truncate font-serif text-[17px] font-medium tracking-[-0.01em]">{title}</h1>
+        {session.createdAt && <span className="hidden text-[13px] text-ink-faint sm:block">{formatDate(session.createdAt)}</span>}
+      </header>
+
+      <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto w-full max-w-[760px] space-y-8 px-4 pt-8 pb-10 sm:px-6">
+          {session.conversation.length === 0 && !isSending && (
+            <p className="pt-10 text-center font-serif text-lg text-ink-soft">Ask anything to get this task started.</p>
           )}
-
-          {session.conversation.map((msg) => (
-            <div
-              key={msg.messageId}
-              className={`flex gap-3 ${
-                msg.sender === "user" ? "flex-row-reverse" : ""
-              }`}
-            >
-              <Avatar className="h-10 w-10 flex-shrink-0">
-                <AvatarFallback
-                  className={msg.isError ? "bg-destructive/10" : ""}
-                >
-                  {msg.sender === "user" ? (
-                    <User className="h-5 w-5" />
-                  ) : msg.isError ? (
-                    <AlertCircle className="h-5 w-5 text-destructive" />
-                  ) : (
-                    <Bot className="h-5 w-5" />
-                  )}
-                </AvatarFallback>
-              </Avatar>
-
-              <div
-                className={`flex-1 space-y-2 ${
-                  msg.sender === "user" ? "items-end" : ""
-                }`}
-              >
-                <div
-                  className={`rounded-lg p-3 max-w-[80%] ${
-                    msg.sender === "user"
-                      ? "bg-primary text-primary-foreground ml-auto"
-                      : msg.isError
-                      ? "bg-destructive/10 border border-destructive/20"
-                      : "bg-muted"
-                  }`}
-                >
-                  <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
-                  <p
-                    className={`text-xs mt-1 ${
-                      msg.isError ? "text-destructive/70" : "opacity-70"
-                    }`}
-                  >
-                    {formatDate(msg.timestamp)}
-                  </p>
-                </div>
-
-                {msg.isDynamic && msg.dynamicContent && (
-                  <div className="space-y-3 mt-3">
-                    {msg.dynamicContent.map((item, idx) => (
-                      <Card key={idx} className="max-w-[80%]">
-                        <CardHeader className="pb-3">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="flex items-start gap-2 flex-1">
-                              <Mail className="h-5 w-5 mt-0.5 flex-shrink-0" />
-                              <div className="flex-1 min-w-0">
-                                <h3 className="font-semibold text-sm truncate">
-                                  {item.metadata.subject}
-                                </h3>
-                                <p className="text-xs text-muted-foreground truncate">
-                                  {item.metadata.from}
-                                </p>
-                              </div>
-                            </div>
-                            <Badge
-                              variant={getOperationColor(
-                                item.metadata.operation
-                              )}
-                              className="flex-shrink-0"
-                            >
-                              {item.metadata.operation.replace(/_/g, " ")}
-                            </Badge>
-                          </div>
-                        </CardHeader>
-
-                        <CardContent className="space-y-3">
-                          {item.metadata.snippet && (
-                            <>
-                              <p className="text-sm text-muted-foreground">
-                                {item.metadata.snippet}
-                              </p>
-                              <Separator />
-                            </>
-                          )}
-
-                          <div className="space-y-2 text-xs">
-                            <div className="flex items-center gap-2">
-                              <Calendar className="h-4 w-4 text-muted-foreground" />
-                              <span>{item.metadata.date}</span>
-                            </div>
-
-                            {item.metadata.labels &&
-                              item.metadata.labels.length > 0 && (
-                                <div className="flex items-start gap-2">
-                                  <Tag className="h-4 w-4 text-muted-foreground mt-0.5" />
-                                  <div className="flex flex-wrap gap-1">
-                                    {item.metadata.labels.map((label) => (
-                                      <Badge
-                                        key={label}
-                                        variant="outline"
-                                        className="text-xs"
-                                      >
-                                        {label}
-                                      </Badge>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
-
-          {isSending && (
-            <div className="flex gap-3">
-              <Avatar className="h-10 w-10 flex-shrink-0">
-                <AvatarFallback>
-                  <Bot className="h-5 w-5" />
-                </AvatarFallback>
-              </Avatar>
-              <div className="bg-muted rounded-lg p-3">
-                <div className="flex gap-1">
-                  <div
-                    className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce"
-                    style={{ animationDelay: "0ms" }}
-                  />
-                  <div
-                    className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce"
-                    style={{ animationDelay: "150ms" }}
-                  />
-                  <div
-                    className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce"
-                    style={{ animationDelay: "300ms" }}
-                  />
-                </div>
-              </div>
-            </div>
+          {session.conversation.map((msg) =>
+            msg.isError || msg.sender === "system" ? (
+              <ErrorMessage key={msg.messageId} msg={msg} onRetry={handleSendMessage} retrying={isSending} />
+            ) : msg.sender === "user" ? (
+              <UserMessage key={msg.messageId} msg={msg} />
+            ) : (
+              <AgentMessage key={msg.messageId} msg={msg} />
+            )
           )}
-
-          {/* 4. This invisible div anchors the scroll to the bottom */}
-          <div ref={bottomRef} />
+          {isSending && <LiveReply steps={liveSteps} text={liveText} />}
         </div>
-      </ScrollArea>
+      </div>
 
-      <div className="p-4 bg-background border-t">
-        <div className="max-w-4xl mx-auto">
+      {!atBottom && (
+        <button
+          type="button"
+          onClick={() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" })}
+          className="absolute bottom-32 left-1/2 inline-flex size-9 -translate-x-1/2 items-center justify-center rounded-full border border-line bg-raised text-ink shadow-float animate-rise-sm hover:bg-paper-2"
+          aria-label="Scroll to the latest message"
+        >
+          <ArrowDown className="size-4" />
+        </button>
+      )}
+
+      <div className="shrink-0 px-4 pb-4 sm:px-6 sm:pb-5">
+        <div className="mx-auto w-full max-w-[760px]">
           <ChatInput
             onSendMessage={handleSendMessage}
             isLoading={isSending}
-            disabled={!!error}
+            placeholder="Reply to GoPilot…"
+            autoFocus
+            onOpenWorkflows={() => setPickerOpen(true)}
           />
+          <p className="mt-2 text-center text-[12px] text-ink-faint">GoPilot acts in your Google apps. Check sent mail and events it reports.</p>
         </div>
       </div>
+      <WorkflowPicker open={pickerOpen} setOpen={setPickerOpen} onRun={runWorkflow} />
     </div>
   );
 }

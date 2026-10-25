@@ -1,241 +1,147 @@
-import { motion } from "framer-motion";
-import {
-  Drawer,
-  DrawerContent,
-  DrawerHeader,
-  DrawerTitle,
-  DrawerFooter,
-} from "@/components/ui/drawer";
-import Logo from "../nav/Logo";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Button } from "@/components/ui/button";
+import { useEffect, useState } from "react";
+import { Check } from "lucide-react";
 import { toast } from "sonner";
-import { useMemo, useState } from "react";
+import { cn } from "@/lib/utils";
 import { axiosInstance } from "@/utils";
-import { Loader2 } from "lucide-react";
+import { errorMessage } from "@/lib/format";
+import { resolveService, SERVICES } from "@/lib/services";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Button } from "@/components/ui/button";
+import { Blossom, Petal } from "@/components/bloom/Blossom";
+import type { Integration } from "./IntegrationCard";
+import { AppIcon } from "./AppIcon";
 
-export default function IntegrationDrawer({ open, drawerState, onClose }) {
-  const [isConnecting, setIsConnecting] = useState(false);
+/** Choose which permissions GoPilot asks Google for, then hand over to Google's consent screen. */
+export default function IntegrationDrawer({
+  open,
+  integration,
+  onClose,
+}: {
+  open: boolean;
+  integration: Integration;
+  onClose: () => void;
+}) {
+  const [selected, setSelected] = useState<string[]>(integration.connectedScopes ?? []);
+  const [connecting, setConnecting] = useState(false);
+  const id = resolveService(integration.service) ?? resolveService(integration.displayName);
+  const svc = id ? SERVICES[id] : null;
+  const all = integration.scopes ?? [];
 
-  if (!drawerState) return null;
+  useEffect(() => {
+    if (open) setSelected(integration.connectedScopes ?? []);
+  }, [open, integration]);
 
-  console.log(drawerState);
-  const beamColor = useMemo(
-    () => (drawerState.isConnected ? "34,197,94" : "239,68,68"),
-    [drawerState.isConnected]
-  );
+  const toggle = (scopeId: string) =>
+    setSelected((xs) => (xs.includes(scopeId) ? xs.filter((x) => x !== scopeId) : [...xs, scopeId]));
+  const allOn = selected.length === all.length && all.length > 0;
 
-  const [selectedScopes, setSelectedScopes] = useState(
-    drawerState.connectedScopes?.map((s) => s) || []
-  );
-  console.log(selectedScopes)
-
-  const toggleScope = (id) => {
-    console.log(selectedScopes);
-    setSelectedScopes((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-    );
-  };
-
-  const selectAll = () => {
-    if (selectedScopes.length === drawerState.scopes.length) {
-      setSelectedScopes([]);
-    } else {
-      setSelectedScopes(drawerState.scopes.map((s) => s._id));
-    }
-  };
-
-  const handleConnection = async () => {
-    if (selectedScopes.length === 0) {
-      toast.success("Please select at least one permission to continue.");
+  const connect = async () => {
+    if (selected.length === 0) {
+      toast.error("Pick at least one permission to continue.");
       return;
     }
-
-    setIsConnecting(true);
+    setConnecting(true);
     try {
-      console.log(
-        selectedScopes,
-        "...................................................................................."
-      );
-
-      const sData = {
-        scopes: selectedScopes,
-        service: drawerState.service,
-      };
-
-      const { data } = await axiosInstance.post(
-        "/connection/google-service-init",
-        sData
-      );
-
-      if (data?.data) {
-        window.location = data.data;
-      } else {
-        throw new Error("Invalid response from server");
-      }
-    } catch (error) {
-      console.error(error);
-      toast.error(
-        error.response?.data?.message ||
-          error.message ||
-          "Failed to initiate connection. Please try again."
-      );
-      setIsConnecting(false);
+      const { data } = await axiosInstance.post("/connection/google-service-init", {
+        scopes: selected,
+        service: integration.service,
+      });
+      if (!data?.data) throw new Error("The server didn't send a Google sign-in link.");
+      window.location.href = data.data;
+    } catch (err) {
+      toast.error("Couldn't start the connection", { description: errorMessage(err, "Try again in a moment.") });
+      setConnecting(false);
     }
   };
-  console.log(drawerState);
+
+  const tint = svc?.petal ?? "var(--peony)";
 
   return (
-    <Drawer open={open} direction="right" onOpenChange={onClose}>
-      <DrawerContent className="max-w-md ml-auto rounded-l-2xl border-l shadow-xl flex flex-col">
-        <DrawerHeader className="pb-4">
-          <DrawerTitle className="text-lg font-semibold flex items-center gap-2">
-            Integration — {drawerState.displayName}
-          </DrawerTitle>
-
-          <div className="flex items-center justify-center gap-3 mt-3">
-            <div className="size-12 flex items-center justify-center rounded-xl shadow-md bg-background border">
-              <Logo variant="icon-only" className="size-8" />
-            </div>
-
-            <motion.svg
-              width="150"
-              height="3"
-              viewBox="0 0 150 3"
-              xmlns="http://www.w3.org/2000/svg"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: open ? 1 : 0 }}
-              transition={{ duration: 0.4 }}
-            >
-              <defs>
-                <linearGradient id="baseLine" x1="0%" x2="100%">
-                  <stop offset="0%" stopColor="#e5e7eb" />
-                  <stop offset="100%" stopColor="#e5e7eb" />
-                </linearGradient>
-
-                <linearGradient id="beamGradient" x1="0%" x2="100%">
-                  <stop offset="0%" stopColor={`rgba(${beamColor},0)`} />
-                  <stop offset="45%" stopColor={`rgba(${beamColor},1)`} />
-                  <stop offset="55%" stopColor={`rgba(${beamColor},1)`} />
-                  <stop offset="100%" stopColor={`rgba(${beamColor},0)`} />
-                </linearGradient>
-
-                <mask id="beamMask">
-                  <motion.rect
-                    width="60"
-                    height="2"
-                    fill="white"
-                    initial={{ x: -60 }}
-                    animate={open ? { x: [-60, 150] } : { x: -60 }}
-                    transition={{
-                      duration: 1.2,
-                      repeat: open ? Infinity : 0,
-                      ease: "linear",
-                    }}
-                  />
-                </mask>
-              </defs>
-
-              <line
-                x1="0"
-                y1="1.5"
-                x2="150"
-                y2="1.5"
-                stroke="url(#baseLine)"
-                strokeWidth="1"
-                strokeLinecap="round"
-              />
-
-              <motion.rect
-                x="0"
-                y="0"
-                width="150"
-                height="3"
-                fill="url(#beamGradient)"
-                mask="url(#beamMask)"
-                style={{ filter: "drop-shadow(0 0 6px rgba(59,130,246,0.4))" }}
-              />
-            </motion.svg>
-
-            <div className="size-12 flex items-center justify-center rounded-xl shadow-md bg-background border">
-              <img
-                src={`http://localhost:5000${drawerState.iconUrl}`}
-                alt={drawerState.displayName}
-                className="size-8 object-contain"
-              />
-            </div>
+    <Sheet open={open} onOpenChange={(o) => !o && !connecting && onClose()}>
+      <SheetContent side="right" className="w-full gap-0 p-0 sm:max-w-md">
+        <SheetHeader className="px-6 pt-7 pb-5">
+          <div className="flex items-center gap-4" aria-hidden>
+            <span className="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-paper-2">
+              <Blossom size={34} motion="sway" />
+            </span>
+            <span className="relative h-6 flex-1 [container-type:inline-size]">
+              <span className="absolute inset-x-0 top-1/2 border-t-2 border-dashed border-line-strong" />
+              {[0, 0.85, 1.7].map((delay, i) => (
+                <span key={i} className="absolute top-0 left-0 animate-travel motion-reduce:hidden" style={{ animationDelay: `${delay}s` }}>
+                  <Petal color={i === 1 ? "var(--clay)" : tint} size={18} rotate={90} />
+                </span>
+              ))}
+            </span>
+            <span className={cn("flex size-14 shrink-0 items-center justify-center rounded-2xl", svc ? svc.bgWash : "bg-paper-2")}>
+              <AppIcon iconUrl={integration.iconUrl} service={id} size={32} />
+            </span>
           </div>
-        </DrawerHeader>
+          <SheetTitle className="mt-6 font-serif text-[24px] font-medium tracking-[-0.01em]">
+            {integration.isConnected ? `${integration.displayName} permissions` : `Connect ${integration.displayName}`}
+          </SheetTitle>
+          <SheetDescription className="text-[14.5px] text-ink-soft">
+            Choose what GoPilot's {integration.displayName} agents may do. Google will ask you to confirm on the next screen.
+          </SheetDescription>
+        </SheetHeader>
 
-        <div className="flex-1 px-6 pb-6 overflow-y-auto">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-base font-semibold">Permissions Requested</h3>
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6">
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="text-[13px] font-medium text-ink-soft">{all.length} permissions</h3>
             <button
-              onClick={selectAll}
-              disabled={isConnecting}
-              className="text-sm text-primary hover:underline cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              type="button"
+              onClick={() => setSelected(allOn ? [] : all.map((s) => s._id))}
+              disabled={connecting}
+              className="text-[13px] font-medium text-clay-ink underline-offset-4 hover:underline disabled:opacity-50"
             >
-              {selectedScopes.length === drawerState.scopes.length
-                ? "Unselect All"
-                : "Select All"}
+              {allOn ? "Clear all" : "Select all"}
             </button>
           </div>
-
-          <div className="space-y-3">
-            {drawerState.scopes.map((scope, i) => (
-              <motion.div
-                key={scope._id}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.09 }}
-                onClick={() => !isConnecting && toggleScope(scope._id)}
-                className={`p-4 rounded-xl border cursor-pointer flex items-start gap-3 ${
-                  selectedScopes.includes(scope._id)
-                    ? "bg-accent border-primary"
-                    : "bg-background hover:bg-accent/50"
-                } ${isConnecting ? "opacity-50 cursor-not-allowed" : ""}`}
-              >
-                <Checkbox
-                  checked={selectedScopes.includes(scope._id)}
-                  onCheckedChange={() => toggleScope(scope._id)}
-                  disabled={isConnecting}
-                  className="mt-1"
-                />
-                <div>
-                  <p className="text-sm font-medium">{scope.description}</p>
-                  <p className="text-xs text-muted-foreground mt-1 break-all">
-                    {scope.name}
-                  </p>
-                </div>
-              </motion.div>
-            ))}
-          </div>
+          <ul className="space-y-2">
+            {all.map((scope, i) => {
+              const on = selected.includes(scope._id);
+              return (
+                <li key={scope._id} className="animate-rise-sm" style={{ animationDelay: `${i * 60}ms` }}>
+                  <button
+                    type="button"
+                    role="checkbox"
+                    aria-checked={on}
+                    disabled={connecting}
+                    onClick={() => toggle(scope._id)}
+                    className={cn(
+                      "flex w-full items-start gap-3.5 rounded-2xl px-4 py-3.5 text-left transition-colors duration-200 disabled:opacity-60",
+                      on ? (svc ? svc.bgWash : "bg-paper-3") : "bg-paper-2 hover:bg-paper-3"
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md transition-all duration-300 ease-[var(--ease-bloom)]",
+                        on ? "scale-100 text-white dark:text-paper" : "scale-90 border-2 border-line-strong"
+                      )}
+                      style={on ? { background: svc?.deep ?? "var(--clay)" } : undefined}
+                    >
+                      {on && <Check className="size-3.5" strokeWidth={3} />}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-[15px] font-medium text-ink">{scope.description}</span>
+                      <span className="block truncate text-[12.5px] text-ink-faint">{scope.name}</span>
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
         </div>
 
-        <DrawerFooter className="border-t px-6 py-4">
-          <Button
-            className="w-full font-medium"
-            onClick={handleConnection}
-            disabled={isConnecting}
-          >
-            {isConnecting ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Connecting...
-              </>
-            ) : (
-              `Connect ${drawerState.displayName}`
-            )}
+        <div className="space-y-2 border-t border-line px-6 py-4">
+          <Button size="lg" className="w-full" onClick={connect} disabled={connecting || selected.length === 0}>
+            {connecting && <Blossom size={16} motion="loading" />}
+            {connecting ? "Opening Google" : selected.length ? `Continue to Google with ${selected.length} ${selected.length === 1 ? "permission" : "permissions"}` : "Pick at least one permission"}
           </Button>
-          <button
-            onClick={onClose}
-            disabled={isConnecting}
-            className="text-sm text-muted-foreground hover:text-foreground hover:underline mt-2 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
+          <Button variant="ghost" className="w-full" onClick={onClose} disabled={connecting}>
             Cancel
-          </button>
-        </DrawerFooter>
-      </DrawerContent>
-    </Drawer>
+          </Button>
+        </div>
+      </SheetContent>
+    </Sheet>
   );
 }

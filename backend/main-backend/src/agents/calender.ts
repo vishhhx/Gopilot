@@ -8,7 +8,7 @@ import { z } from "zod";
 --------------------------- */
 
 
-const CalendarEventSchema = z.object({
+export const CalendarEventSchema = z.object({
   type: z.literal("calendar"),
   title: z.string(),
   url: z.string().nullable(),
@@ -33,7 +33,7 @@ const CalendarEventSchema = z.object({
     .nullable(),
 });
 
-const CalendarResponseSchema = z.object({
+export const CalendarResponseSchema = z.object({
   isDynamic: z.boolean(),
   content: z.string(),
   dynamicContent: z.array(CalendarEventSchema).nullable(),
@@ -102,6 +102,7 @@ export const calendarWriterAgent = new Agent({
   handoffDescription: "Create and update calendar events.",
   instructions: `${RECOMMENDED_PROMPT_PREFIX}
 You are the Calendar Writer Agent.
+If you are not given an eventId, find the event yourself with list_calendar_events (by date, time or title) and use the match's id. Ask only if nothing matches or several events match equally well.
 
 Your primary responsibilities:
 - Create new calendar events
@@ -120,7 +121,7 @@ When a user asks to:
 - Delete events → hand off to the delete agent
 
 ${RESPONSE_FORMAT_INSTRUCTIONS}`,
-  tools: [createCalendarEventTool, updateCalendarEventTool, quickAddCalendarEventTool],
+  tools: [listCalendarEventsTool, getCalendarEventTool, createCalendarEventTool, updateCalendarEventTool, quickAddCalendarEventTool],
   outputType: CalendarResponseSchema,
 });
 
@@ -133,6 +134,7 @@ export const calendarDeleteAgent = new Agent({
   handoffDescription: "Delete calendar events (requires confirmation).",
   instructions: `${RECOMMENDED_PROMPT_PREFIX}
 You are the Calendar Delete Agent.
+If you are not given an eventId, find the event yourself with list_calendar_events (by date, time or title) and use the match's id. Ask only if nothing matches or several events match equally well.
 
 CRITICAL SAFETY RULES:
 - NEVER delete an event without explicit user confirmation
@@ -163,7 +165,7 @@ When a user asks to:
 - List or read events → hand off to the reader agent
 
 ${RESPONSE_FORMAT_INSTRUCTIONS}`,
-  tools: [deleteCalendarEventTool],
+  tools: [listCalendarEventsTool, getCalendarEventTool, deleteCalendarEventTool],
   outputType: CalendarResponseSchema,
 });
 
@@ -171,7 +173,7 @@ ${RESPONSE_FORMAT_INSTRUCTIONS}`,
        COORDINATOR AGENT (ENTRY POINT)
 --------------------------- */
 
-const calendarHandoffs = [
+export const calendarHandoffs = [
   handoff(calendarReaderAgent, {
     toolDescriptionOverride: "List, search, or read calendar events.",
   }),
@@ -182,6 +184,8 @@ const calendarHandoffs = [
     toolDescriptionOverride: "Delete calendar events (with confirmation).",
   }),
 ];
+
+
 
 export const calendarCoordinatorAgent = new Agent({
   name: "calendar-coordinator-agent",
@@ -223,44 +227,4 @@ ${RESPONSE_FORMAT_INSTRUCTIONS}`,
     INTERNAL HANDOFF RULES
 --------------------------- */
 
-// Reader can escalate to Writer or Delete
-calendarReaderAgent.handoffs = [
-  handoff(calendarWriterAgent, {
-    toolDescriptionOverride:
-      "Create or modify events based on user request from reading events.",
-  }),
-  handoff(calendarDeleteAgent, {
-    toolDescriptionOverride: "Delete events if user requests deletion.",
-  }),
-  handoff(calendarCoordinatorAgent, {
-    toolDescriptionOverride: "Return to coordinator if uncertain.",
-  }),
-];
 
-// Writer can escalate to Reader or Delete
-calendarWriterAgent.handoffs = [
-  handoff(calendarReaderAgent, {
-    toolDescriptionOverride: "Verify created/updated events by reading them.",
-  }),
-  handoff(calendarDeleteAgent, {
-    toolDescriptionOverride: "Switch to delete if user changes mind.",
-  }),
-  handoff(calendarCoordinatorAgent, {
-    toolDescriptionOverride: "Return to coordinator for other requests.",
-  }),
-];
-
-// Delete can escalate to Reader or Writer
-calendarDeleteAgent.handoffs = [
-  handoff(calendarReaderAgent, {
-    toolDescriptionOverride: "Verify deletion by listing remaining events.",
-  }),
-  handoff(calendarWriterAgent, {
-    toolDescriptionOverride: "Create a new event instead of deleting.",
-  }),
-  handoff(calendarCoordinatorAgent, {
-    toolDescriptionOverride: "Return to coordinator for other requests.",
-  }),
-];
-
-export default calendarCoordinatorAgent;

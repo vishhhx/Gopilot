@@ -1,856 +1,200 @@
 import { tool, RunContext } from "@openai/agents";
 import { z } from "zod";
-import { FormAgentService } from "../utils/google/forms";
+import { FormsService, QuestionInput } from "../utils/google/forms";
 
 export interface Tokens {
   service: string;
   refreshToken: string;
 }
 
-function getRefreshToken(context: any) {
-  console.log("🔍 Context received:", context);
-
-  // If inside context.form array
-  if (Array.isArray(context.form)) {
-    const found = context.form.find((t) => t.service === "form");
-    if (!found || !found.refreshToken) {
-      throw new Error("No refresh token for form service found");
-    }
-    return found.refreshToken;
+function getRefreshToken(context: unknown) {
+  // Chat runs pass the token list itself as context.
+  const tokens: Tokens[] = Array.isArray(context)
+    ? context
+    : Array.isArray((context as { form?: unknown })?.form)
+      ? (context as { form: Tokens[] }).form
+      : [];
+  const found = tokens.find((t) => t.service === "form" || t.service === "forms");
+  if (!found?.refreshToken) {
+    throw new Error("Google Forms isn't connected. Connect it in Settings > Connected apps.");
   }
-
-  // If context.form is object
-  if (context.form?.refreshToken) {
-    return context.form.refreshToken;
-  }
-
-  throw new Error("No refresh token for form service found");
+  return found.refreshToken;
 }
 
+/** Runs a Forms call with the user's token and turns errors into a message the agent can act on. */
+const withForms = async <T>(runContext: RunContext<unknown> | undefined, fn: (forms: FormsService) => Promise<T>) => {
+  try {
+    const forms = new FormsService(getRefreshToken(runContext?.context));
+    return { success: true, data: await fn(forms) };
+  } catch (error: any) {
+    const status = error?.code ?? error?.response?.status;
+    const message =
+      status === 403
+        ? `Google refused this (${error?.message}). The Forms connection may be missing a permission: reconnect Google Forms in Settings > Connected apps and grant all permissions.`
+        : status === 404
+          ? "No form with that id. List the forms to find the right one."
+          : error?.message || "Google Forms request failed";
+    console.error("[forms tool]", message);
+    return { success: false, error: message };
+  }
+};
 
-// ==================== LIST FORMS TOOLS ====================
+const QuestionSchema = z.object({
+  title: z.string().min(1).describe("The question as the respondent sees it."),
+  type: z
+    .enum(["short_text", "paragraph", "multiple_choice", "checkboxes", "dropdown", "linear_scale", "rating", "date", "time"])
+    .describe("short_text: one line. paragraph: long answer. linear_scale: e.g. 1-5. rating: stars."),
+  required: z.boolean(),
+  description: z.string().nullable().describe("Help text under the question, or null."),
+  options: z
+    .array(z.string())
+    .nullable()
+    .describe("Choices for multiple_choice, checkboxes and dropdown (at least 2). null for other types."),
+  scale: z
+    .object({
+      low: z.number().int().describe("0 or 1"),
+      high: z.number().int().describe("2 to 10. For rating, the number of stars (3 to 10)."),
+      lowLabel: z.string().nullable(),
+      highLabel: z.string().nullable(),
+    })
+    .nullable()
+    .describe("For linear_scale and rating, else null."),
+});
+
+const FormIdSchema = z.string().min(1).describe("The Google Form id (from list_forms or an earlier result).");
+
+// ==================== READ ====================
 
 export const listFormsTool = tool({
   name: "list_forms",
-  description: `
-Get a list of all forms.
-Parameters:
-- maxResults: Number of forms to return (1-500, default: 10)
-- pageToken: Token for pagination or empty string ""
-- status: Filter by form status (active, draft, archived)
-- sortBy: Sort forms by (created, modified, name)
-  `,
+  description: "List the user's Google Forms, newest first. Use to find a form's id by its title.",
   parameters: z.object({
-    maxResults: z
-      .number()
-      .int()
-      .min(1)
-      .max(500)
-      .describe("Number of forms to return"),
-    pageToken: z.string().describe("Pagination token or empty string"),
-    status: z
-      .string()
-      .describe("Filter by form status: active, draft, or archived"),
-    sortBy: z
-      .string()
-      .describe("Sort forms by: created, modified, or name"),
+    nameContains: z.string().nullable().describe("Only forms whose title contains this text, or null for all."),
+    maxResults: z.number().int().min(1).max(100).describe("How many to return; 20 if unsure."),
   }),
-  execute: async (
-    { maxResults, pageToken, status, sortBy },
-    runContext?: RunContext<Tokens[]>
-  ) => {
-    try {
-      if (runContext === undefined) {
-        throw new Error("No refresh token found");
-      }
-      const refreshToken = getRefreshToken(runContext.context);
-
-      if (!refreshToken) {
-        return {
-          success: false,
-          error: "Missing refresh token in context.",
-        };
-      }
-
-      const formService = new FormAgentService(refreshToken);
-      const result = await formService.listForms({
-        maxResults: maxResults || 10,
-        pageToken: pageToken || undefined,
-        status: status as "active" | "draft" | "archived" | undefined,
-        sortBy: sortBy as "created" | "modified" | "name" | undefined,
-      });
-
-      return {
-        success: true,
-        data: result,
-      };
-    } catch (error: any) {
-      console.error("Error listing forms:", error);
-      return {
-        success: false,
-        error: error?.message || "Failed to list forms",
-      };
-    }
-  },
+  execute: (args, runContext?: RunContext<unknown>) =>
+    withForms(runContext, (forms) => forms.listForms(args)),
 });
-
-export const listFormIdsTool = tool({
-  name: "list_form_ids",
-  description: `
-Get only the form IDs using filters.
-Parameters:
-- maxResults: Number of forms to return (1-500, default: 10)
-- pageToken: Token for pagination, default: ""
-- status: Filter by status (active, draft, archived), default: "active"
-  `,
-  parameters: z.object({
-    maxResults: z
-      .number()
-      .int()
-      .min(1)
-      .max(500)
-      .describe("Number of form IDs to return"),
-    pageToken: z.string().describe("Pagination token or empty string"),
-    status: z.string().describe("Filter by status: active, draft, or archived"),
-  }),
-  execute: async (
-    { maxResults, pageToken, status },
-    runContext?: RunContext<Tokens[]>
-  ) => {
-    try {
-      if (runContext === undefined) {
-        throw new Error("No refresh token found");
-      }
-      const refreshToken = getRefreshToken(runContext.context);
-
-      if (!refreshToken) {
-        return {
-          success: false,
-          error: "Missing refresh token in context.",
-        };
-      }
-
-      const formService = new FormAgentService(refreshToken);
-      const result = await formService.listForms({
-        maxResults: maxResults || 10,
-        pageToken: pageToken || undefined,
-        status: status as "active" | "draft" | "archived",
-      });
-
-      const ids = result.forms?.map((f) => f.id) || [];
-
-      return {
-        success: true,
-        data: {
-          ids,
-          totalResults: result.totalResults || 0,
-          nextPageToken: result.nextPageToken || null,
-        },
-      };
-    } catch (err: any) {
-      console.error("Error listing form IDs:", err);
-      return {
-        success: false,
-        error: err?.message || "Failed to fetch form IDs",
-      };
-    }
-  },
-});
-
-// ==================== CREATE FORM TOOLS ====================
-
-export const createFormTool = tool({
-  name: "create_form",
-  description: `
-Create a new form with questions.
-Parameters:
-- title: Form title (required)
-- description: Form description (optional, use "" if not provided)
-- questions: Array of question objects with title, type, required, options, etc.
-- settings: Form settings like allowMultipleResponses, collectEmails, etc.
-  `,
-  parameters: z.object({
-    title: z.string().min(1).describe("Form title"),
-    description: z.string().describe("Form description or empty string"),
-    questions: z
-      .array(
-        z.object({
-          title: z.string().describe("Question text"),
-          type: z.enum([
-            "shortText",
-            "longText",
-            "multipleChoice",
-            "checkbox",
-            "dropdown",
-            "rating",
-            "date",
-          ]).describe("Question type"),
-          required: z.boolean().describe("Is question required"),
-          options: z.array(z.string()).describe("Options for multiple choice questions or empty array"),
-          placeholder: z.string().describe("Placeholder text or empty string"),
-          description: z.string().describe("Question description or empty string"),
-        })
-      )
-      .describe("Array of questions"),
-    settings: z
-      .object({
-        allowMultipleResponses: z.boolean().describe("Allow multiple responses"),
-        collectEmails: z.boolean().describe("Collect email addresses"),
-        showProgress: z.boolean().describe("Show progress bar"),
-        shuffleQuestions: z.boolean().describe("Shuffle question order"),
-      })
-      .describe("Form settings"),
-  }),
-  execute: async (args: any, runContext?: RunContext<Tokens[]>) => {
-    try {
-      if (runContext === undefined) {
-        throw new Error("No refresh token found");
-      }
-      const refreshToken = getRefreshToken(runContext.context);
-
-      if (!refreshToken) {
-        return {
-          success: false,
-          error: "Missing refresh token in context.",
-        };
-      }
-
-      const formService = new FormAgentService(refreshToken);
-      const result = await formService.createForm({
-        title: args.title,
-        description: args.description || "",
-        questions: args.questions,
-        settings: args.settings,
-      });
-
-      return {
-        success: true,
-        message: "Form created successfully",
-        data: {
-          id: result.id,
-          title: result.title,
-          shareableLink: result.shareableLink,
-          shortLink: result.shortLink,
-          embedCode: result.embedCode,
-          createdAt: result.createdAt,
-        },
-      };
-    } catch (error: any) {
-      return {
-        success: false,
-        error: error.message || "Failed to create form",
-      };
-    }
-  },
-});
-
-// ==================== READ FORM TOOLS ====================
 
 export const getFormTool = tool({
   name: "get_form",
-  description: "Get detailed information about a specific form by ID.",
-  parameters: z.object({
-    formId: z.string().min(1).describe("The form ID"),
-  }),
-  execute: async (
-    { formId },
-    runContext?: RunContext<Tokens[]>
-  ) => {
-    try {
-      if (runContext === undefined) {
-        throw new Error("No refresh token found");
-      }
-      const refreshToken = getRefreshToken(runContext.context);
-
-      if (!refreshToken) {
-        return {
-          success: false,
-          error: "Missing refresh token in context.",
-        };
-      }
-
-      const formService = new FormAgentService(refreshToken);
-      const form = await formService.getForm(formId);
-
-      return {
-        success: true,
-        data: form,
-      };
-    } catch (err: any) {
-      console.error("get_form tool error:", err);
-      return {
-        success: false,
-        error: err?.message || "Failed to get form.",
-      };
-    }
-  },
+  description:
+    "Get a form's title, description, questions (with itemIds, types and options), publish state, editUrl and responderUrl (the share link).",
+  parameters: z.object({ formId: FormIdSchema }),
+  execute: ({ formId }, runContext?: RunContext<unknown>) =>
+    withForms(runContext, (forms) => forms.getForm(formId)),
 });
-
-// ==================== RESPONSES TOOLS ====================
 
 export const listResponsesTool = tool({
   name: "list_responses",
-  description: `
-Get all responses for a form.
-Parameters:
-- formId: The form ID (required)
-- maxResults: Number of responses to return (1-500, default: 10)
-- pageToken: Pagination token or empty string ""
-- sortBy: Sort responses by (newest, oldest)
-  `,
+  description: "List a form's responses, newest first, with each answer labelled by its question.",
   parameters: z.object({
-    formId: z.string().min(1).describe("The form ID"),
-    maxResults: z
-      .number()
-      .int()
-      .min(1)
-      .max(500)
-      .describe("Number of responses to return"),
-    pageToken: z.string().describe("Pagination token or empty string"),
-    sortBy: z.string().describe("Sort order: newest or oldest"),
+    formId: FormIdSchema,
+    limit: z.number().int().min(1).max(200).describe("How many responses to return; 20 if unsure."),
   }),
-  execute: async (
-    { formId, maxResults, pageToken, sortBy },
-    runContext?: RunContext<Tokens[]>
-  ) => {
-    try {
-      if (runContext === undefined) {
-        throw new Error("No refresh token found");
-      }
-      const refreshToken = getRefreshToken(runContext.context);
-
-      if (!refreshToken) {
-        return {
-          success: false,
-          error: "Missing refresh token in context.",
-        };
-      }
-
-      const formService = new FormAgentService(refreshToken);
-      const result = await formService.listResponses(formId, {
-        maxResults: maxResults || 10,
-        pageToken: pageToken || undefined,
-        sortBy: sortBy as "newest" | "oldest",
-      });
-
-      return {
-        success: true,
-        data: result,
-      };
-    } catch (error: any) {
-      console.error("Error listing responses:", error);
-      return {
-        success: false,
-        error: error?.message || "Failed to list responses",
-      };
-    }
-  },
+  execute: ({ formId, limit }, runContext?: RunContext<unknown>) =>
+    withForms(runContext, (forms) => forms.listResponses(formId, limit)),
 });
 
-export const getResponseTool = tool({
-  name: "get_response",
-  description: "Get a specific response by ID.",
-  parameters: z.object({
-    formId: z.string().min(1).describe("The form ID"),
-    responseId: z.string().min(1).describe("The response ID"),
-  }),
-  execute: async (
-    { formId, responseId },
-    runContext?: RunContext<Tokens[]>
-  ) => {
-    try {
-      if (runContext === undefined) {
-        throw new Error("No refresh token found");
-      }
-      const refreshToken = getRefreshToken(runContext.context);
-
-      if (!refreshToken) {
-        return {
-          success: false,
-          error: "Missing refresh token in context.",
-        };
-      }
-
-      const formService = new FormAgentService(refreshToken);
-      const response = await formService.getResponse(formId, responseId);
-
-      return {
-        success: true,
-        data: response,
-      };
-    } catch (error: any) {
-      console.error("Error getting response:", error);
-      return {
-        success: false,
-        error: error?.message || "Failed to get response",
-      };
-    }
-  },
+export const summarizeResponsesTool = tool({
+  name: "summarize_responses",
+  description:
+    "Summarize all responses to a form: total count, answer counts per choice, averages for scales and ratings, sample text answers.",
+  parameters: z.object({ formId: FormIdSchema }),
+  execute: ({ formId }, runContext?: RunContext<unknown>) =>
+    withForms(runContext, (forms) => forms.summarizeResponses(formId)),
 });
 
-export const submitResponseTool = tool({
-  name: "submit_response",
-  description: `
-Submit a response to a form. This is for form filling.
-Parameters:
-- formId: The form ID (required)
-- answers: Array of answers with questionId and value
-- responderEmail: Email of person submitting (optional, use "" if not provided)
-  `,
+// ==================== CREATE ====================
+
+export const createFormTool = tool({
+  name: "create_form",
+  description:
+    "Create a Google Form with its questions and publish it. Returns editUrl (for the owner) and responderUrl (the link to share).",
   parameters: z.object({
-    formId: z.string().min(1).describe("The form ID"),
-    answers: z
-      .array(
-        z.object({
-          questionId: z.string().describe("The question ID"),
-          value: z.union([z.string(), z.array(z.string()), z.number()]).describe("Answer value"),
-        })
-      )
-      .describe("Array of answers"),
-    responderEmail: z.string().describe("Email of responder or empty string"),
+    title: z.string().min(1),
+    description: z.string().nullable().describe("Shown under the title, or null."),
+    questions: z.array(QuestionSchema).min(1).max(50),
   }),
-  execute: async (
-    args: any,
-    runContext?: RunContext<Tokens[]>
-  ) => {
-    try {
-      if (runContext === undefined) {
-        throw new Error("No refresh token found");
-      }
-      const refreshToken = getRefreshToken(runContext.context);
-
-      if (!refreshToken) {
-        return {
-          success: false,
-          error: "Missing refresh token in context.",
-        };
-      }
-
-      const formService = new FormAgentService(refreshToken);
-      const result = await formService.submitResponse(args.formId, {
-        answers: args.answers,
-        responderEmail: args.responderEmail || undefined,
-      });
-
-      return {
-        success: true,
-        message: "Response submitted successfully",
-        data: {
-          id: result.id,
-          formId: result.formId,
-          submittedAt: result.metadata?.submittedAt,
-        },
-      };
-    } catch (error: any) {
-      return {
-        success: false,
-        error: error.message || "Failed to submit response",
-      };
-    }
-  },
+  execute: (args, runContext?: RunContext<unknown>) =>
+    withForms(runContext, (forms) => forms.createForm({ ...args, questions: args.questions as QuestionInput[] })),
 });
 
-// ==================== UPDATE FORM TOOLS ====================
-
-export const updateFormTool = tool({
-  name: "update_form",
-  description: `
-Update form details like title, description, questions, or status.
-Parameters:
-- formId: The form ID (required)
-- title: New form title (optional, use "" to skip)
-- description: New description (optional, use "" to skip)
-- status: New status (active, draft, archived) (optional)
-  `,
+export const addQuestionsTool = tool({
+  name: "add_questions",
+  description: "Add questions to an existing form, at a position or at the end.",
   parameters: z.object({
-    formId: z.string().min(1).describe("The form ID"),
-    title: z.string().describe("New form title or empty string"),
-    description: z.string().describe("New description or empty string"),
-    status: z.string().describe("New status: active, draft, or archived or empty string"),
+    formId: FormIdSchema,
+    questions: z.array(QuestionSchema).min(1).max(50),
+    position: z.number().int().min(0).nullable().describe("0-based position to insert at, or null for the end."),
   }),
-  execute: async (args: any, runContext?: RunContext<Tokens[]>) => {
-    try {
-      if (runContext === undefined) {
-        throw new Error("No refresh token found");
-      }
-      const refreshToken = getRefreshToken(runContext.context);
-
-      if (!refreshToken) {
-        return {
-          success: false,
-          error: "Missing refresh token in context.",
-        };
-      }
-
-      const formService = new FormAgentService(refreshToken);
-      const result = await formService.updateForm(args.formId, {
-        title: args.title || undefined,
-        description: args.description || undefined,
-        status: args.status || undefined,
-      });
-
-      return {
-        success: true,
-        message: "Form updated successfully",
-        data: result,
-      };
-    } catch (error: any) {
-      return {
-        success: false,
-        error: error.message || "Failed to update form",
-      };
-    }
-  },
+  execute: ({ formId, questions, position }, runContext?: RunContext<unknown>) =>
+    withForms(runContext, (forms) => forms.addQuestions(formId, questions as QuestionInput[], position)),
 });
 
 export const duplicateFormTool = tool({
   name: "duplicate_form",
-  description: "Create a copy of an existing form with a new title.",
-  parameters: z.object({
-    formId: z.string().min(1).describe("The form ID to duplicate"),
-    newTitle: z.string().min(1).describe("Title for the new form"),
-  }),
-  execute: async (
-    { formId, newTitle },
-    runContext?: RunContext<Tokens[]>
-  ) => {
-    try {
-      if (runContext === undefined) {
-        throw new Error("No refresh token found");
-      }
-      const refreshToken = getRefreshToken(runContext.context);
-
-      if (!refreshToken) {
-        return {
-          success: false,
-          error: "Missing refresh token in context.",
-        };
-      }
-
-      const formService = new FormAgentService(refreshToken);
-      const result = await formService.duplicateForm(formId, newTitle);
-
-      return {
-        success: true,
-        message: "Form duplicated successfully",
-        data: {
-          id: result.id,
-          title: result.title,
-          shareableLink: result.shareableLink,
-        },
-      };
-    } catch (error: any) {
-      return {
-        success: false,
-        error: error.message || "Failed to duplicate form",
-      };
-    }
-  },
+  description: "Copy a form (questions and settings, no responses) under a new title, published.",
+  parameters: z.object({ formId: FormIdSchema, title: z.string().min(1) }),
+  execute: ({ formId, title }, runContext?: RunContext<unknown>) =>
+    withForms(runContext, (forms) => forms.duplicateForm(formId, title)),
 });
 
-// ==================== FORM SETTINGS TOOLS ====================
+// ==================== EDIT ====================
 
-export const addQuestionTool = tool({
-  name: "add_question",
-  description: "Add a new question to a form.",
+export const updateFormInfoTool = tool({
+  name: "update_form_info",
+  description: "Change a form's title and/or description.",
   parameters: z.object({
-    formId: z.string().min(1).describe("The form ID"),
-    title: z.string().min(1).describe("Question text"),
-    type: z.enum([
-      "shortText",
-      "longText",
-      "multipleChoice",
-      "checkbox",
-      "dropdown",
-      "rating",
-      "date",
-    ]).describe("Question type"),
-    required: z.boolean().describe("Is question required"),
-    options: z.array(z.string()).describe("Options for multiple choice questions or empty array"),
-    placeholder: z.string().describe("Placeholder text or empty string"),
-    description: z.string().describe("Question description or empty string"),
+    formId: FormIdSchema,
+    title: z.string().nullable().describe("New title, or null to keep."),
+    description: z.string().nullable().describe("New description, or null to keep."),
   }),
-  execute: async (args: any, runContext?: RunContext<Tokens[]>) => {
-    try {
-      if (runContext === undefined) {
-        throw new Error("No refresh token found");
-      }
-      const refreshToken = getRefreshToken(runContext.context);
-
-      if (!refreshToken) {
-        return {
-          success: false,
-          error: "Missing refresh token in context.",
-        };
-      }
-
-      const formService = new FormAgentService(refreshToken);
-      const result = await formService.addQuestion(args.formId, {
-        id: `q_${Date.now()}`,
-        title: args.title,
-        type: args.type,
-        required: args.required,
-        options: args.options || undefined,
-        placeholder: args.placeholder || undefined,
-        description: args.description || undefined,
-      });
-
-      return {
-        success: true,
-        message: "Question added successfully",
-        data: result,
-      };
-    } catch (error: any) {
-      return {
-        success: false,
-        error: error.message || "Failed to add question",
-      };
-    }
-  },
+  execute: ({ formId, ...changes }, runContext?: RunContext<unknown>) =>
+    withForms(runContext, (forms) => forms.updateInfo(formId, changes)),
 });
 
-export const removeQuestionTool = tool({
-  name: "remove_question",
-  description: "Remove a question from a form.",
-  parameters: z.object({
-    formId: z.string().min(1).describe("The form ID"),
-    questionId: z.string().min(1).describe("The question ID to remove"),
-  }),
-  execute: async (
-    { formId, questionId },
-    runContext?: RunContext<Tokens[]>
-  ) => {
-    try {
-      if (runContext === undefined) {
-        throw new Error("No refresh token found");
-      }
-      const refreshToken = getRefreshToken(runContext.context);
-
-      if (!refreshToken) {
-        return {
-          success: false,
-          error: "Missing refresh token in context.",
-        };
-      }
-
-      const formService = new FormAgentService(refreshToken);
-      await formService.removeQuestion(formId, questionId);
-
-      return {
-        success: true,
-        message: "Question removed successfully",
-      };
-    } catch (error: any) {
-      return {
-        success: false,
-        error: error.message || "Failed to remove question",
-      };
-    }
-  },
-});
-
-// ==================== DELETE TOOLS ====================
-
-export const deleteFormTool = tool({
-  name: "delete_form",
-  description: "PERMANENTLY delete a form. This action cannot be undone.",
-  parameters: z.object({
-    formId: z.string().min(1).describe("The form ID to delete"),
-  }),
-  needsApproval: true,
-  execute: async (
-    { formId },
-    runContext?: RunContext<Tokens[]>
-  ) => {
-    try {
-      if (runContext === undefined) {
-        throw new Error("No refresh token found");
-      }
-      const refreshToken = getRefreshToken(runContext.context);
-
-      if (!refreshToken) {
-        return {
-          success: false,
-          error: "Missing refresh token in context.",
-        };
-      }
-
-      const formService = new FormAgentService(refreshToken);
-      await formService.deleteForm(formId);
-
-      return {
-        success: true,
-        message: "Form deleted permanently",
-      };
-    } catch (error: any) {
-      return {
-        success: false,
-        error: error.message || "Failed to delete form",
-      };
-    }
-  },
-});
-
-export const deleteResponseTool = tool({
-  name: "delete_response",
-  description: "Delete a specific response.",
-  parameters: z.object({
-    formId: z.string().min(1).describe("The form ID"),
-    responseId: z.string().min(1).describe("The response ID to delete"),
-  }),
-  needsApproval: true,
-  execute: async (
-    { formId, responseId },
-    runContext?: RunContext<Tokens[]>
-  ) => {
-    try {
-      if (runContext === undefined) {
-        throw new Error("No refresh token found");
-      }
-      const refreshToken = getRefreshToken(runContext.context);
-
-      if (!refreshToken) {
-        return {
-          success: false,
-          error: "Missing refresh token in context.",
-        };
-      }
-
-      const formService = new FormAgentService(refreshToken);
-      await formService.deleteResponse(formId, responseId);
-
-      return {
-        success: true,
-        message: "Response deleted successfully",
-      };
-    } catch (error: any) {
-      return {
-        success: false,
-        error: error.message || "Failed to delete response",
-      };
-    }
-  },
-});
-
-export const clearResponsesTool = tool({
-  name: "clear_responses",
+export const updateQuestionTool = tool({
+  name: "update_question",
   description:
-    "Delete ALL responses for a form. This action cannot be undone.",
+    "Edit one question (find its itemId with get_form). Pass null for anything that should stay the same.",
   parameters: z.object({
-    formId: z.string().min(1).describe("The form ID"),
+    formId: FormIdSchema,
+    itemId: z.string().min(1),
+    title: z.string().nullable(),
+    description: z.string().nullable(),
+    required: z.boolean().nullable(),
+    options: z.array(z.string()).nullable().describe("Replace all choices (choice questions only), or null."),
   }),
-  needsApproval: true,
-  execute: async (
-    { formId },
-    runContext?: RunContext<Tokens[]>
-  ) => {
-    try {
-      if (runContext === undefined) {
-        throw new Error("No refresh token found");
-      }
-      const refreshToken = getRefreshToken(runContext.context);
-
-      if (!refreshToken) {
-        return {
-          success: false,
-          error: "Missing refresh token in context.",
-        };
-      }
-
-      const formService = new FormAgentService(refreshToken);
-      const result = await formService.clearResponses(formId);
-
-      return {
-        success: true,
-        message: result.message,
-      };
-    } catch (error: any) {
-      return {
-        success: false,
-        error: error.message || "Failed to clear responses",
-      };
-    }
-  },
+  execute: ({ formId, itemId, ...changes }, runContext?: RunContext<unknown>) =>
+    withForms(runContext, (forms) => forms.updateQuestion(formId, itemId, changes)),
 });
 
-// ==================== ADVANCED TOOLS ====================
-
-export const exportResponsesTool = tool({
-  name: "export_responses",
-  description: "Export all form responses in CSV or JSON format.",
-  parameters: z.object({
-    formId: z.string().min(1).describe("The form ID"),
-    format: z.enum(["csv", "json"]).describe("Export format"),
-  }),
-  execute: async (
-    { formId, format },
-    runContext?: RunContext<Tokens[]>
-  ) => {
-    try {
-      if (runContext === undefined) {
-        throw new Error("No refresh token found");
-      }
-      const refreshToken = getRefreshToken(runContext.context);
-
-      if (!refreshToken) {
-        return {
-          success: false,
-          error: "Missing refresh token in context.",
-        };
-      }
-
-      const formService = new FormAgentService(refreshToken);
-      const result = await formService.exportResponses(formId, format as "csv" | "json");
-
-      return {
-        success: true,
-        message: `Responses exported as ${format}`,
-        data: result,
-      };
-    } catch (error: any) {
-      return {
-        success: false,
-        error: error.message || "Failed to export responses",
-      };
-    }
-  },
+export const deleteQuestionTool = tool({
+  name: "delete_question",
+  description: "Remove one question from a form (find its itemId with get_form).",
+  parameters: z.object({ formId: FormIdSchema, itemId: z.string().min(1) }),
+  execute: ({ formId, itemId }, runContext?: RunContext<unknown>) =>
+    withForms(runContext, (forms) => forms.deleteQuestion(formId, itemId)),
 });
 
-export const getAnalyticsTool = tool({
-  name: "get_analytics",
-  description: "Get analytics for a form including response count and insights.",
-  parameters: z.object({
-    formId: z.string().min(1).describe("The form ID"),
-  }),
-  execute: async (
-    { formId },
-    runContext?: RunContext<Tokens[]>
-  ) => {
-    try {
-      if (runContext === undefined) {
-        throw new Error("No refresh token found");
-      }
-      const refreshToken = getRefreshToken(runContext.context);
+export const setAcceptingResponsesTool = tool({
+  name: "set_accepting_responses",
+  description: "Open or close a form for responses (closing keeps the form and its responses).",
+  parameters: z.object({ formId: FormIdSchema, accepting: z.boolean() }),
+  execute: ({ formId, accepting }, runContext?: RunContext<unknown>) =>
+    withForms(runContext, async (forms) => {
+      await forms.setPublishState(formId, { isPublished: true, isAcceptingResponses: accepting });
+      return forms.getForm(formId);
+    }),
+});
 
-      if (!refreshToken) {
-        return {
-          success: false,
-          error: "Missing refresh token in context.",
-        };
-      }
+// ==================== DELETE ====================
 
-      const formService = new FormAgentService(refreshToken);
-      const analytics = await formService.generateAnalytics(formId);
-
-      return {
-        success: true,
-        data: analytics,
-      };
-    } catch (error: any) {
-      return {
-        success: false,
-        error: error.message || "Failed to get analytics",
-      };
-    }
-  },
+export const trashFormTool = tool({
+  name: "trash_form",
+  description: "Move a form to the user's Drive trash. It can be restored from Drive for 30 days.",
+  parameters: z.object({ formId: FormIdSchema }),
+  execute: ({ formId }, runContext?: RunContext<unknown>) =>
+    withForms(runContext, (forms) => forms.trashForm(formId)),
 });

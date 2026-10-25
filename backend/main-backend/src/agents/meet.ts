@@ -187,6 +187,10 @@ Your responsibilities:
 - Move meetings between calendars
 - Reschedule meetings
 
+Finding the meeting:
+- If you are not given an eventId, find it yourself with list_meetings (by date, time or title) and use the match's id.
+- Ask only if nothing matches or several meetings match equally well.
+
 When updating meetings:
 - Get current meeting details first if needed
 - Only modify specified fields, keep others unchanged
@@ -212,6 +216,8 @@ Example responses:
 - "Moved meeting from 'Work' to 'Personal' calendar"
 `,
   tools: [
+    listMeetingsTool,
+    getMeetingTool,
     updateMeetingTool,
     addAttendeesTool,
     removeAttendeesTool,
@@ -224,6 +230,9 @@ export const meetDeleteAgent = new Agent({
   name: "meet-delete-agent",
   instructions: `
 You are the Google Meet Delete Agent.
+Finding the meeting:
+- If you are not given an eventId, find it yourself with list_meetings (by date, time or title) and use the match's id.
+- Ask only if nothing matches or several meetings match equally well.
 Your responsibilities:
 - Cancel meetings (soft delete - marks as cancelled)
 - Permanently delete meetings (hard delete)
@@ -253,57 +262,8 @@ Example responses:
 - "Permanently deleted meeting 'Old Planning Session'. This action cannot be undone."
 - "Do you want to cancel (keeps record) or permanently delete this meeting?"
 `,
-  tools: [cancelMeetingTool, deleteMeetingTool],
+  tools: [listMeetingsTool, getMeetingTool, cancelMeetingTool, deleteMeetingTool],
   outputType: MeetAgentResponseSchema,
 });
 
-// Optional: Combined agent for full Google Meet management
-export const meetManagerAgent = new Agent({
-  name: "meet-manager-agent",
-  instructions: `
-You are the Google Meet Manager Agent with full access to all meeting operations.
-Your responsibilities:
-- Create, read, update, and delete meetings
-- Manage attendees and calendars
-- Handle both simple and complex meeting workflows
 
-Workflow examples:
-1. "Schedule a meeting and invite the team"
-   - Create meeting → Add attendees → Send invitations
-
-2. "Find my meeting with John and reschedule it"
-   - Search meetings → Get details → Update time → Notify attendees
-
-3. "Cancel all meetings tomorrow"
-   - List meetings for tomorrow → Cancel each one → Confirm with user
-
-Best practices:
-- Always confirm before bulk operations
-- Provide meet links in responses when available
-- Use quick create for simple requests
-- Use full create for detailed requirements
-- Default to cancel instead of delete (safer)
-- Send notifications unless explicitly told not to
-
-${MEET_RESPONSE_FORMAT_INSTRUCTIONS}
-`,
-  tools: [
-    // Reader tools
-    listMeetingsTool,
-    getMeetingTool,
-    listCalendarsTool,
-    getCalendarTool,
-    // Creator tools
-    createMeetingTool,
-    quickCreateMeetingTool,
-    // Editor tools
-    updateMeetingTool,
-    addAttendeesTool,
-    removeAttendeesTool,
-    moveMeetingTool,
-    // Delete tools
-    cancelMeetingTool,
-    deleteMeetingTool,
-  ],
-  outputType: MeetAgentResponseSchema,
-});

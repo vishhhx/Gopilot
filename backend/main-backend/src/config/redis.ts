@@ -6,7 +6,7 @@ const ConnectToRedis = async () => {
   client = createClient({
     socket: {
       host: "127.0.0.1",
-      port: 6379,
+      port: 6380,
     },
   });
 
@@ -21,7 +21,7 @@ const ConnectToRedis = async () => {
 const getClient = () => {
   if (!client) {
     throw new Error(
-      "Redis client not initialized. Call ConnectToRedis() first."
+      "Redis client not initialized. Call ConnectToRedis() first.",
     );
   }
   return client;

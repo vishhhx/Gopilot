@@ -2,34 +2,33 @@ import { Agent, handoff } from "@openai/agents";
 import { RECOMMENDED_PROMPT_PREFIX } from "@openai/agents-core/extensions";
 import {
   listFormsTool,
-  listFormIdsTool,
   getFormTool,
-  createFormTool,
-  updateFormTool,
-  duplicateFormTool,
-  addQuestionTool,
-  removeQuestionTool,
-  submitResponseTool,
   listResponsesTool,
-  getResponseTool,
-  deleteFormTool,
-  deleteResponseTool,
-  clearResponsesTool,
-  exportResponsesTool,
-  getAnalyticsTool,
+  summarizeResponsesTool,
+  createFormTool,
+  addQuestionsTool,
+  duplicateFormTool,
+  updateFormInfoTool,
+  updateQuestionTool,
+  deleteQuestionTool,
+  setAcceptingResponsesTool,
+  trashFormTool,
 } from "../tools/form";
-import { sheetsCoordinatorAgent } from "./orchestrator";
 import { z } from "zod";
 
+// Field names match the Forms card in the chat UI.
 const DynamicContentSchema = z.object({
   type: z.literal("form"),
   title: z.string(),
-  url: z.string().nullable(),
+  url: z.string().nullable().describe("The form's editUrl; null once trashed."),
   metadata: z.object({
     formId: z.string(),
     formTitle: z.string(),
     responseId: z.string().nullable(),
-    status: z.enum(["active", "draft", "archived"]).nullable(),
+    status: z
+      .enum(["active", "closed", "unpublished"])
+      .nullable()
+      .describe("active = accepting responses, closed = not accepting, unpublished = not published."),
     questionCount: z.number().nullable(),
     responseCount: z.number().nullable(),
     operation: z.enum([
@@ -39,23 +38,19 @@ const DynamicContentSchema = z.object({
       "duplicated",
       "question_added",
       "question_removed",
-      "response_submitted",
       "response_viewed",
-      "responses_exported",
-      "deleted",
-      "response_deleted",
-      "responses_cleared",
+      "trashed",
     ]),
   }),
   data: z
     .object({
-      shareableLink: z.string().nullable(),
+      shareableLink: z.string().nullable().describe("The form's responderUrl."),
       shortLink: z.string().nullable(),
       embedCode: z.string().nullable(),
       questions: z
         .array(
           z.object({
-            id: z.string(),
+            id: z.string().describe("The question's itemId."),
             title: z.string(),
             type: z.string(),
           })
@@ -87,217 +82,122 @@ const AgentResponseSchema = z.object({
 
 const RESPONSE_FORMAT_INSTRUCTIONS = `
 RESPONSE FORMAT:
-- isDynamic: true for Form data, false otherwise
-- One dynamicContent entry per form/operation (multiple for bulk)
-- Always include formId, formTitle, operation; url=null if deleted
-- Include shareableLink, shortLink for created/duplicated forms
-- content: human-readable summary
+- isDynamic: true when you return form data, false otherwise.
+- One dynamicContent entry per form. Copy values from the tool result, never invent them:
+  url = editUrl, data.shareableLink = responderUrl, shortLink and embedCode = null,
+  metadata.status from isPublished/isAcceptingResponses, questionCount, data.questions from questions (id = itemId).
+- content: a short summary that includes the share link (responderUrl) for created or duplicated forms, and the form id.
+- If a tool returns success: false, say what failed using its error message. Never claim success without a successful tool result.
 `;
 
-/* --- Form Agents (specialized by task) --- */
+const FORM_DESIGN_INSTRUCTIONS = `
+DESIGNING FORMS:
+- If the user doesn't specify questions ("anything", "a feedback form", "I'm testing"), write good ones yourself. Don't ask.
+- Write real, specific questions for the form's purpose, never placeholders like "Question 1".
+- Pick the type that fits: rating or linear_scale (1-5, with labels like "Poor"/"Excellent") for satisfaction,
+  multiple_choice for one answer, checkboxes for several, dropdown for long lists, short_text for names/emails,
+  paragraph for open feedback, date/time when asked for one.
+- Give choice questions 3 to 6 clear options. Mark the essential questions required; keep open feedback optional.
+- Use the number of questions the user asked for. Default to 5 if they didn't say.
+- Give the form a clear title and a one-line description.
+`;
+
+/* --- Form agents (specialized by task) --- */
 
 export const formReaderAgent = new Agent({
   name: "form-reader-agent",
-  handoffDescription: "List, search, and read forms and responses.",
+  handoffDescription: "List and read forms, their questions and their responses.",
   instructions: `${RECOMMENDED_PROMPT_PREFIX}
-You are the Form reader.
-- List forms by status (active, draft, archived)
-- Get form details including questions
-- List/read responses for a form
-- Show analytics for forms
-- Return structured summaries (id, title, status, questionCount, responseCount)
-- If user wants actions after listing (delete/edit/etc.), present results then hand off
+You are the Google Forms reader.
+- Find forms with list_forms (use nameContains to search by title); read one with get_form.
+- For responses use list_responses (individual answers) or summarize_responses (counts, averages, overview).
+- If you're given a form title instead of an id, find the id with list_forms first.
+- Responses can't be submitted or deleted through the API; say so if asked.
+- Use operation "read" for forms and "response_viewed" for responses (set responseCount to the total).
 ${RESPONSE_FORMAT_INSTRUCTIONS}`,
-  tools: [
-    listFormsTool,
-    listFormIdsTool,
-    getFormTool,
-    listResponsesTool,
-    getResponseTool,
-    getAnalyticsTool,
-  ],
+  tools: [listFormsTool, getFormTool, listResponsesTool, summarizeResponsesTool],
   outputType: AgentResponseSchema,
 });
 
 export const formCreatorAgent = new Agent({
   name: "form-creator-agent",
-  handoffDescription: "Create new forms and add/remove questions.",
+  handoffDescription: "Create new forms (with questions) and duplicate forms.",
   instructions: `${RECOMMENDED_PROMPT_PREFIX}
-You are the Form creator.
-- Create new forms with title, description, and questions
-- Add questions to existing forms
-- Remove questions from forms
-- Duplicate existing forms
-- Generate and return shareable links, short links, and embed codes
-- Ask for confirmation if creating forms with many questions (>10)
-- Use operation "created" for new forms, "duplicated" for copies, "question_added"/"question_removed" for modifications
+You are the Google Forms builder.
+- Create forms with create_form, sending every question in one call. The form is published automatically.
+- Duplicate with duplicate_form (find the source id with list_forms if you only have a title).
+- Use operation "created" or "duplicated".
+${FORM_DESIGN_INSTRUCTIONS}
 ${RESPONSE_FORMAT_INSTRUCTIONS}`,
-  tools: [
-    createFormTool,
-    addQuestionTool,
-    removeQuestionTool,
-    duplicateFormTool,
-  ],
-  outputType: AgentResponseSchema,
-});
-
-export const formResponseAgent = new Agent({
-  name: "form-response-agent",
-  handoffDescription: "Submit form responses, view, and export response data.",
-  instructions: `${RECOMMENDED_PROMPT_PREFIX}
-You are the Form response handler.
-- Submit responses to forms
-- View individual responses
-- List all responses for a form
-- Export responses in CSV or JSON format
-- Generate analytics for forms
-- For bulk exports (>100 responses) ask for confirmation
-- Use operation "response_submitted" for submissions, "responses_exported" for exports
-${RESPONSE_FORMAT_INSTRUCTIONS}`,
-  tools: [
-    submitResponseTool,
-    listResponsesTool,
-    getResponseTool,
-    exportResponsesTool,
-    getAnalyticsTool,
-  ],
+  tools: [createFormTool, duplicateFormTool, listFormsTool],
   outputType: AgentResponseSchema,
 });
 
 export const formEditorAgent = new Agent({
   name: "form-editor-agent",
-  handoffDescription: "Edit form properties, title, status, and structure.",
+  handoffDescription: "Edit forms: title, description, questions, and opening/closing responses.",
   instructions: `${RECOMMENDED_PROMPT_PREFIX}
-You are the Form editor.
-- Update form title, description, and settings
-- Change form status (active, draft, archived)
-- Modify form structure
-- For status changes ask for confirmation if form has responses
-- Use operation "updated" for all edits
+You are the Google Forms editor.
+- If you don't have the form id, find it with list_forms. Call get_form to see current questions and their itemIds before editing questions.
+- update_form_info for title/description; add_questions, update_question, delete_question for questions;
+  set_accepting_responses to open or close the form.
+- Change only what was asked and keep everything else.
+- Use operation "question_added", "question_removed" or "updated".
+${FORM_DESIGN_INSTRUCTIONS}
 ${RESPONSE_FORMAT_INSTRUCTIONS}`,
-  tools: [updateFormTool],
+  tools: [
+    listFormsTool,
+    getFormTool,
+    updateFormInfoTool,
+    addQuestionsTool,
+    updateQuestionTool,
+    deleteQuestionTool,
+    setAcceptingResponsesTool,
+  ],
   outputType: AgentResponseSchema,
 });
 
 export const formDeleteAgent = new Agent({
   name: "form-delete-agent",
-  handoffDescription:
-    "Delete forms and responses (requires explicit confirmation).",
+  handoffDescription: "Move forms to the Drive trash.",
   instructions: `${RECOMMENDED_PROMPT_PREFIX}
-You are the Form permanent-delete agent.
-CRITICAL:
-- NEVER delete without explicit confirmation: allowed confirmations: "YES DELETE PERMANENTLY", "DELETE FOREVER", "CONFIRM PERMANENT DELETION"
-- If confirmation not exact, present warning and ask again
-- For forms with responses, warn user that all responses will be deleted
-- For clearing all responses, ask for explicit confirmation
-Process:
-1) Expect form/response IDs from previous agent
-2) If explicit confirmation -> delete; else ask again
-After deletion: set isDynamic:true with operation:"deleted"/"response_deleted"/"responses_cleared" and url:null
-Before deletion (confirm stage): set isDynamic:false
+You are the Google Forms delete agent.
+- Find the form with list_forms or get_form. If several forms match the request, list them and ask which one; don't guess.
+- trash_form moves it to Drive trash (restorable for 30 days). Tell the user that.
+- Use operation "trashed" with url null.
 ${RESPONSE_FORMAT_INSTRUCTIONS}`,
-  tools: [deleteFormTool, deleteResponseTool, clearResponsesTool],
+  tools: [listFormsTool, getFormTool, trashFormTool],
   outputType: AgentResponseSchema,
 });
 
 /* --- Coordinator and handoffs --- */
 const formHandoffs = [
   handoff(formReaderAgent, {
-    toolDescriptionOverride: "Default: list/search/read forms and responses.",
+    toolDescriptionOverride: "Default: list/search/read forms, questions and responses.",
   }),
   handoff(formCreatorAgent, {
-    toolDescriptionOverride: "Create forms, add/remove questions, duplicate.",
+    toolDescriptionOverride: "Create a new form or duplicate one.",
   }),
   handoff(formEditorAgent, {
-    toolDescriptionOverride: "Edit form properties and status.",
-  }),
-  handoff(formResponseAgent, {
-    toolDescriptionOverride: "Submit/view/export responses and analytics.",
+    toolDescriptionOverride: "Edit a form's title, description, questions, or open/close responses.",
   }),
   handoff(formDeleteAgent, {
-    toolDescriptionOverride:
-      "Permanent deletion ONLY with explicit phrases like 'delete permanently' or 'erase permanently'.",
+    toolDescriptionOverride: "Delete (move to trash) a form.",
   }),
 ];
 
 export const formCoordinatorAgent = new Agent({
   name: "form-coordinator-agent",
   instructions: `${RECOMMENDED_PROMPT_PREFIX}
-You are the Form coordinator (entry point).
-- Route to reader (default for view/list/search forms and responses)
-- Route to creator for new forms, duplicating, or adding questions
-- Route to editor for updating form properties and status
-- Route to response-handler for submitting/exporting/viewing responses
-- Route to delete ONLY for explicit permanent-delete confirmations
-- For cross-service workflows with Sheets, route to Sheets coordinator
-- For "create a form"/"new form" → creator
-- For "show my forms"/"list forms" → reader
-- For "submit response" → response-handler
-- For "delete form" or "find and delete" → reader first (so user can review)
-Default to reader if unclear.
+You are the Google Forms coordinator (entry point). Hand off immediately:
+- create / make / build a form, duplicate a form → creator
+- change, rename, add/remove/edit questions, open/close a form → editor
+- delete / remove a form → delete
+- everything else (list, show, read, responses, results, summary) → reader
 ${RESPONSE_FORMAT_INSTRUCTIONS}`,
   tools: [],
-  handoffs: [
-    ...formHandoffs,
-    handoff(sheetsCoordinatorAgent, {
-      toolDescriptionOverride: "Forms → Sheets cross-service workflows.",
-    }),
-  ],
+  handoffs: formHandoffs,
   outputType: AgentResponseSchema,
 });
-
-/* --- Internal agent handoffs (cross-routing) --- */
-
-formReaderAgent.handoffs = [
-  handoff(formEditorAgent, {
-    toolDescriptionOverride: "Edit form properties after viewing.",
-  }),
-  handoff(formCreatorAgent, {
-    toolDescriptionOverride: "Duplicate or create similar form.",
-  }),
-  handoff(formResponseAgent, {
-    toolDescriptionOverride: "View or export responses.",
-  }),
-  handoff(formDeleteAgent, {
-    toolDescriptionOverride:
-      "Permanent delete ONLY with explicit confirmation phrases.",
-  }),
-];
-
-formCreatorAgent.handoffs = [
-  handoff(formReaderAgent, {
-    toolDescriptionOverride: "View created form or check existing forms.",
-  }),
-  handoff(formEditorAgent, {
-    toolDescriptionOverride: "Edit form after creation.",
-  }),
-];
-
-formResponseAgent.handoffs = [
-  handoff(formReaderAgent, {
-    toolDescriptionOverride: "Return to reader to verify responses.",
-  }),
-  handoff(formDeleteAgent, {
-    toolDescriptionOverride: "Delete responses if requested.",
-  }),
-];
-
-formEditorAgent.handoffs = [
-  handoff(formReaderAgent, {
-    toolDescriptionOverride: "View updated form.",
-  }),
-  handoff(formDeleteAgent, {
-    toolDescriptionOverride: "Delete form if user changes mind.",
-  }),
-];
-
-formDeleteAgent.handoffs = [
-  handoff(formReaderAgent, {
-    toolDescriptionOverride: "Verify deletion results if requested.",
-  }),
-  handoff(formEditorAgent, {
-    toolDescriptionOverride: "Switch to edit if user changes mind.",
-  }),
-];
 
 export default formCoordinatorAgent;

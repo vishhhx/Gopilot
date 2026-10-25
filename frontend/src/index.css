@@ -3,163 +3,158 @@
 
 @custom-variant dark (&:is(.dark *));
 
-@theme inline {
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive);
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
-  --color-chart-1: var(--chart-1);
-  --color-chart-2: var(--chart-2);
-  --color-chart-3: var(--chart-3);
-  --color-chart-4: var(--chart-4);
-  --color-chart-5: var(--chart-5);
-  --color-sidebar: var(--sidebar);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-ring: var(--sidebar-ring);
-}
+/*
+  GoPilot — "pressed garden" theme.
+  One motif runs the system: a six-petal blossom. The orchestrator is the pollen centre and each
+  Google service is one petal, always in the same pastel:
+    Gmail = peony · Calendar = buttercup · Drive = sage · Sheets = mint · Meet = cornflower · Forms = lavender
+  Each flower has three tones: the petal (fills), -deep (text and icons on light grounds) and -wash (tints).
+*/
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.2101 0.0318 264.6645);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.2101 0.0318 264.6645);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.2101 0.0318 264.6645);
-  --primary: oklch(0.6716 0.1368 48.513);
-  --primary-foreground: oklch(1 0 0);
-  --secondary: oklch(0.536 0.0398 196.028);
-  --secondary-foreground: oklch(1 0 0);
-  --muted: oklch(0.967 0.0029 264.5419);
-  --muted-foreground: oklch(0.551 0.0234 264.3637);
-  --accent: oklch(0.9491 0 0);
-  --accent-foreground: oklch(0.2101 0.0318 264.6645);
-  --destructive: oklch(0.6368 0.2078 25.3313);
-  --destructive-foreground: oklch(0.9851 0 0);
-  --border: oklch(0.9276 0.0058 264.5313);
-  --input: oklch(0.9276 0.0058 264.5313);
-  --ring: oklch(0.6716 0.1368 48.513);
-  --chart-1: oklch(0.594 0.0443 196.0233);
-  --chart-2: oklch(0.7214 0.1337 49.9802);
-  --chart-3: oklch(0.8721 0.0864 68.5474);
-  --chart-4: oklch(0.6268 0 0);
-  --chart-5: oklch(0.683 0 0);
-  --sidebar: oklch(0.967 0.0029 264.5419);
-  --sidebar-foreground: oklch(0.2101 0.0318 264.6645);
-  --sidebar-primary: oklch(0.6716 0.1368 48.513);
-  --sidebar-primary-foreground: oklch(1 0 0);
-  --sidebar-accent: oklch(1 0 0);
-  --sidebar-accent-foreground: oklch(0.2101 0.0318 264.6645);
-  --sidebar-border: oklch(0.9276 0.0058 264.5313);
-  --sidebar-ring: oklch(0.6716 0.1368 48.513);
-  --font-sans: Geist Mono, ui-monospace, monospace;
-  --font-serif: serif;
-  --font-mono: JetBrains Mono, monospace;
-  --radius: 0.75rem;
-  --shadow-x: 0px;
-  --shadow-y: 1px;
-  --shadow-blur: 4px;
-  --shadow-spread: 0px;
-  --shadow-opacity: 0.05;
-  --shadow-color: #000000;
-  --shadow-2xs: 0px 1px 4px 0px hsl(0 0% 0% / 0.03);
-  --shadow-xs: 0px 1px 4px 0px hsl(0 0% 0% / 0.03);
-  --shadow-sm: 0px 1px 4px 0px hsl(0 0% 0% / 0.05),
-    0px 1px 2px -1px hsl(0 0% 0% / 0.05);
-  --shadow: 0px 1px 4px 0px hsl(0 0% 0% / 0.05),
-    0px 1px 2px -1px hsl(0 0% 0% / 0.05);
-  --shadow-md: 0px 1px 4px 0px hsl(0 0% 0% / 0.05),
-    0px 2px 4px -1px hsl(0 0% 0% / 0.05);
-  --shadow-lg: 0px 1px 4px 0px hsl(0 0% 0% / 0.05),
-    0px 4px 6px -1px hsl(0 0% 0% / 0.05);
-  --shadow-xl: 0px 1px 4px 0px hsl(0 0% 0% / 0.05),
-    0px 8px 10px -1px hsl(0 0% 0% / 0.05);
-  --shadow-2xl: 0px 1px 4px 0px hsl(0 0% 0% / 0.13);
-  --tracking-normal: 0rem;
-  --spacing: 0.25rem;
+  /* ground, surfaces, ink */
+  --paper: #faf6f0;
+  --paper-2: #f3ece2;
+  --paper-3: #ece3d6;
+  --raised: #fffdfa;
+  --ink: #2a2421;
+  --ink-soft: #6b5f57;
+  --ink-faint: #9a8d82;
+  --line: #e6dccf;
+  --line-strong: #d9ccbc;
+
+  /* the one accent: warm clay, for the primary action */
+  --clay: #b5583a;
+  --clay-hover: #a14c31;
+  --clay-ink: #9c4a2f;
+  --on-clay: #fff8f3;
+  --pollen: #e3a93f;
+
+  /* the six flowers */
+  --peony: #f4c6cd;
+  --peony-deep: #a8435a;
+  --peony-wash: #fbeaec;
+  --buttercup: #f5de9c;
+  --buttercup-deep: #8a6510;
+  --buttercup-wash: #fcf4dc;
+  --sage: #cde0c0;
+  --sage-deep: #47703a;
+  --sage-wash: #eef5e9;
+  --mint: #bce3d3;
+  --mint-deep: #2a7058;
+  --mint-wash: #e9f6f0;
+  --cornflower: #c7d5f4;
+  --cornflower-deep: #3f5a9e;
+  --cornflower-wash: #edf2fc;
+  --lavender: #dacbf1;
+  --lavender-deep: #634a99;
+  --lavender-wash: #f3eefb;
+
+  --danger: #b33a3a;
+  --danger-wash: #fbe9e7;
+
+  /* the garden: stems and leaves that carry the flowers */
+  --stem: #8aa877;
+  --leaf: #bcd4aa;
+  --leaf-deep: #7f9e6c;
+
+  /* shadcn roles mapped onto the garden */
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: var(--raised);
+  --card-foreground: var(--ink);
+  --popover: var(--raised);
+  --popover-foreground: var(--ink);
+  --primary: var(--clay);
+  --primary-foreground: var(--on-clay);
+  --secondary: var(--paper-2);
+  --secondary-foreground: var(--ink);
+  --muted: var(--paper-2);
+  --muted-foreground: var(--ink-soft);
+  --accent: #efe6da;
+  --accent-foreground: var(--ink);
+  --destructive: var(--danger);
+  --destructive-foreground: #fff;
+  --border: var(--line);
+  --input: var(--line-strong);
+  --ring: var(--clay);
+  --sidebar: var(--paper);
+  --sidebar-foreground: var(--ink);
+  --sidebar-primary: var(--clay);
+  --sidebar-primary-foreground: var(--on-clay);
+  --sidebar-accent: var(--paper-2);
+  --sidebar-accent-foreground: var(--ink);
+  --sidebar-border: var(--line);
+  --sidebar-ring: var(--clay);
+  --chart-1: var(--peony-deep);
+  --chart-2: var(--buttercup-deep);
+  --chart-3: var(--sage-deep);
+  --chart-4: var(--cornflower-deep);
+  --chart-5: var(--lavender-deep);
+
+  --radius: 0.875rem;
+  --float-shadow: 0 1px 2px rgb(60 40 25 / 0.05), 0 8px 24px -8px rgb(60 40 25 / 0.14);
+
+  /* motion tokens */
+  --ease-soft: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-bloom: cubic-bezier(0.34, 1.56, 0.64, 1);
+  color-scheme: light;
 }
 
 .dark {
-  --background: oklch(0.1797 0.0043 308.1928);
-  --foreground: oklch(0.8109 0 0);
-  --card: oklch(0.1822 0 0);
-  --card-foreground: oklch(0.8109 0 0);
-  --popover: oklch(0.1797 0.0043 308.1928);
-  --popover-foreground: oklch(0.8109 0 0);
-  --primary: oklch(0.7214 0.1337 49.9802);
-  --primary-foreground: oklch(0.1797 0.0043 308.1928);
-  --secondary: oklch(0.594 0.0443 196.0233);
-  --secondary-foreground: oklch(0.1797 0.0043 308.1928);
-  --muted: oklch(0.252 0 0);
-  --muted-foreground: oklch(0.6268 0 0);
-  --accent: oklch(0.3211 0 0);
-  --accent-foreground: oklch(0.8109 0 0);
-  --destructive: oklch(0.594 0.0443 196.0233);
-  --destructive-foreground: oklch(0.1797 0.0043 308.1928);
-  --border: oklch(0.252 0 0);
-  --input: oklch(0.252 0 0);
-  --ring: oklch(0.7214 0.1337 49.9802);
-  --chart-1: oklch(0.594 0.0443 196.0233);
-  --chart-2: oklch(0.7214 0.1337 49.9802);
-  --chart-3: oklch(0.8721 0.0864 68.5474);
-  --chart-4: oklch(0.6268 0 0);
-  --chart-5: oklch(0.683 0 0);
-  --sidebar: oklch(0.1822 0 0);
-  --sidebar-foreground: oklch(0.8109 0 0);
-  --sidebar-primary: oklch(0.7214 0.1337 49.9802);
-  --sidebar-primary-foreground: oklch(0.1797 0.0043 308.1928);
-  --sidebar-accent: oklch(0.3211 0 0);
-  --sidebar-accent-foreground: oklch(0.8109 0 0);
-  --sidebar-border: oklch(0.252 0 0);
-  --sidebar-ring: oklch(0.7214 0.1337 49.9802);
-  --font-sans: Geist Mono, ui-monospace, monospace;
-  --font-serif: serif;
-  --font-mono: JetBrains Mono, monospace;
-  --radius: 0.75rem;
-  --shadow-x: 0px;
-  --shadow-y: 1px;
-  --shadow-blur: 4px;
-  --shadow-spread: 0px;
-  --shadow-opacity: 0.05;
-  --shadow-color: #000000;
-  --shadow-2xs: 0px 1px 4px 0px hsl(0 0% 0% / 0.03);
-  --shadow-xs: 0px 1px 4px 0px hsl(0 0% 0% / 0.03);
-  --shadow-sm: 0px 1px 4px 0px hsl(0 0% 0% / 0.05),
-    0px 1px 2px -1px hsl(0 0% 0% / 0.05);
-  --shadow: 0px 1px 4px 0px hsl(0 0% 0% / 0.05),
-    0px 1px 2px -1px hsl(0 0% 0% / 0.05);
-  --shadow-md: 0px 1px 4px 0px hsl(0 0% 0% / 0.05),
-    0px 2px 4px -1px hsl(0 0% 0% / 0.05);
-  --shadow-lg: 0px 1px 4px 0px hsl(0 0% 0% / 0.05),
-    0px 4px 6px -1px hsl(0 0% 0% / 0.05);
-  --shadow-xl: 0px 1px 4px 0px hsl(0 0% 0% / 0.05),
-    0px 8px 10px -1px hsl(0 0% 0% / 0.05);
-  --shadow-2xl: 0px 1px 4px 0px hsl(0 0% 0% / 0.13);
+  --paper: #1c1816;
+  --paper-2: #231e1b;
+  --paper-3: #2b2521;
+  --raised: #27211e;
+  --ink: #f2eae2;
+  --ink-soft: #ada095;
+  --ink-faint: #7f746b;
+  --line: #3a322c;
+  --line-strong: #4a4038;
+
+  --clay: #e3896a;
+  --clay-hover: #eb9a7d;
+  --clay-ink: #f0a487;
+  --on-clay: #2a1a12;
+  --pollen: #e8b85a;
+
+  --peony: #e3a7b1;
+  --peony-deep: #f2bcc5;
+  --peony-wash: #3a2429;
+  --buttercup: #e2c977;
+  --buttercup-deep: #f0d88e;
+  --buttercup-wash: #352c1a;
+  --sage: #a7c697;
+  --sage-deep: #bfdab2;
+  --sage-wash: #24301f;
+  --mint: #92cbb5;
+  --mint-deep: #a9dcc8;
+  --mint-wash: #1d302a;
+  --cornflower: #a2b7e7;
+  --cornflower-deep: #bacbf0;
+  --cornflower-wash: #212a3b;
+  --lavender: #bba5e2;
+  --lavender-deep: #cdbdec;
+  --lavender-wash: #2c2438;
+
+  --danger: #e5807a;
+  --danger-wash: #3b2120;
+
+  --stem: #6f8a60;
+  --leaf: #4f6845;
+  --leaf-deep: #7d9a6c;
+
+  --accent: #2f2824;
+  --destructive-foreground: #2a1210;
+  --float-shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 10px 30px -10px rgb(0 0 0 / 0.55);
+  color-scheme: dark;
 }
 
 @theme inline {
+  --font-sans: "Figtree Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-serif: "Fraunces Variable", ui-serif, Georgia, "Times New Roman", serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -193,70 +188,673 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
 
-  --font-sans: var(--font-sans);
-  --font-mono: var(--font-mono);
-  --font-serif: var(--font-serif);
+  --color-paper: var(--paper);
+  --color-paper-2: var(--paper-2);
+  --color-paper-3: var(--paper-3);
+  --color-raised: var(--raised);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-ink-faint: var(--ink-faint);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-clay: var(--clay);
+  --color-clay-hover: var(--clay-hover);
+  --color-clay-ink: var(--clay-ink);
+  --color-on-clay: var(--on-clay);
+  --color-pollen: var(--pollen);
+  --color-danger: var(--danger);
+  --color-danger-wash: var(--danger-wash);
+  --color-stem: var(--stem);
+  --color-leaf: var(--leaf);
+  --color-leaf-deep: var(--leaf-deep);
 
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
+  --color-peony: var(--peony);
+  --color-peony-deep: var(--peony-deep);
+  --color-peony-wash: var(--peony-wash);
+  --color-buttercup: var(--buttercup);
+  --color-buttercup-deep: var(--buttercup-deep);
+  --color-buttercup-wash: var(--buttercup-wash);
+  --color-sage: var(--sage);
+  --color-sage-deep: var(--sage-deep);
+  --color-sage-wash: var(--sage-wash);
+  --color-mint: var(--mint);
+  --color-mint-deep: var(--mint-deep);
+  --color-mint-wash: var(--mint-wash);
+  --color-cornflower: var(--cornflower);
+  --color-cornflower-deep: var(--cornflower-deep);
+  --color-cornflower-wash: var(--cornflower-wash);
+  --color-lavender: var(--lavender);
+  --color-lavender-deep: var(--lavender-deep);
+  --color-lavender-wash: var(--lavender-wash);
+
+  --radius-sm: calc(var(--radius) - 6px);
+  --radius-md: calc(var(--radius) - 4px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
 
-  --shadow-2xs: var(--shadow-2xs);
-  --shadow-xs: var(--shadow-xs);
-  --shadow-sm: var(--shadow-sm);
-  --shadow: var(--shadow);
-  --shadow-md: var(--shadow-md);
-  --shadow-lg: var(--shadow-lg);
-  --shadow-xl: var(--shadow-xl);
-  --shadow-2xl: var(--shadow-2xl);
+  --shadow-float: var(--float-shadow);
 
-  --tracking-tighter: calc(var(--tracking-normal) - 0.05em);
-  --tracking-tight: calc(var(--tracking-normal) - 0.025em);
-  --tracking-normal: var(--tracking-normal);
-  --tracking-wide: calc(var(--tracking-normal) + 0.025em);
-  --tracking-wider: calc(var(--tracking-normal) + 0.05em);
-  --tracking-widest: calc(var(--tracking-normal) + 0.1em);
+  --ease-soft: var(--ease-soft);
+  --ease-bloom: var(--ease-bloom);
+
+  --animate-rise: rise 520ms var(--ease-soft) both;
+  --animate-rise-sm: rise-sm 360ms var(--ease-soft) both;
+  --animate-fade: fade 400ms var(--ease-soft) both;
+  --animate-bloom: bloom 700ms var(--ease-bloom) both;
+  --animate-node-in: node-in 460ms var(--ease-bloom) both;
+  --animate-sway: sway 7s ease-in-out infinite;
+  --animate-breathe: breathe 5.5s ease-in-out infinite;
+  --animate-spin-slow: spin 60s linear infinite;
+  --animate-float: float 6s ease-in-out infinite;
+  --animate-travel: travel 2.6s linear infinite;
 }
 
-body {
-  letter-spacing: var(--tracking-normal);
-}
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+    text-rendering: optimizeLegibility;
+  }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+  h1,
+  h2,
+  h3,
+  .font-serif {
+    font-optical-sizing: auto;
+    font-variation-settings: "SOFT" 100, "WONK" 0;
+  }
+  ::selection {
+    background: var(--peony);
+    color: var(--ink);
+  }
+  :focus-visible {
+    outline: 2px solid var(--clay);
+    outline-offset: 2px;
+  }
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  a[href] {
+    cursor: pointer;
   }
 }
-@theme inline {
-  --animate-cell-ripple: cell-ripple var(--duration, 200ms) ease-out none 1
-    var(--delay, 0ms);
 
-  @keyframes cell-ripple {
-    0% {
-      opacity: 0.4;
-    }
-    50% {
-      opacity: 0.8;
-    }
-    100% {
-      opacity: 0.4;
-    }
+/* ---------- the blossom motif ---------- */
+
+.petal {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+}
+
+.blossom-bloom .petal {
+  animation: petal-open 760ms var(--ease-bloom) both;
+  animation-delay: calc(var(--i, 0) * 90ms + var(--bloom-delay, 0ms));
+}
+.blossom-bloom .pollen {
+  animation: pollen-in 520ms var(--ease-bloom) both;
+  animation-delay: var(--bloom-delay, 0ms);
+}
+
+.blossom-loading .petal {
+  animation: petal-pulse 1.44s var(--ease-soft) infinite;
+  animation-delay: calc(var(--i, 0) * 240ms);
+}
+.blossom-loading > g {
+  animation: spin 9s linear infinite;
+  transform-origin: 0 0;
+}
+
+.blossom-sway {
+  animation: sway 9s ease-in-out infinite;
+}
+
+.petal-hover {
+  transition: transform 420ms var(--ease-bloom), opacity 300ms var(--ease-soft);
+}
+.petal-hover:hover {
+  transform: scale(1.06);
+}
+
+/* petals drifting across empty screens */
+.drift-petal {
+  position: absolute;
+  top: -8%;
+  animation: drift var(--dur, 18s) linear infinite;
+  animation-delay: var(--delay, 0s);
+  will-change: transform;
+}
+
+/* ---------- the garden: stems grow, leaves unfurl, heads bloom, then everything sways ---------- */
+
+/* --d is the flower's start delay, --grow how long its stem takes */
+.garden-grow .stem {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: stem-grow var(--grow, 1.3s) var(--ease-soft) forwards;
+  animation-delay: var(--d, 0ms);
+}
+.garden .leaf {
+  transform-box: fill-box;
+  transform-origin: 0% 50%;
+}
+.garden-grow .leaf {
+  animation: leaf-unfurl 700ms var(--ease-bloom) both;
+  animation-delay: calc(var(--d, 0ms) + var(--grow, 1.3s) * var(--at, 0.4));
+}
+.garden .bud {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.garden-grow .flower-head .petal {
+  animation: petal-open 760ms var(--ease-bloom) both;
+  animation-delay: calc(var(--d, 0ms) + var(--grow, 1.3s) * 0.85 + var(--i, 0) * 70ms);
+}
+.garden-grow .flower-head .bud {
+  animation: bud-open 640ms var(--ease-bloom) both;
+  animation-delay: calc(var(--d, 0ms) + var(--grow, 1.3s) * 0.85 + var(--i, 0) * 60ms);
+}
+.garden .plant {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+}
+.garden-grow .plant {
+  animation: plant-sway var(--sway, 7s) ease-in-out infinite;
+  animation-delay: calc(var(--d, 0ms) + var(--grow, 1.3s) + 400ms);
+}
+/* a head on its own (icons, list markers) blooms when it mounts */
+.flower-bloom .petal {
+  animation: petal-open 700ms var(--ease-bloom) both;
+  animation-delay: calc(var(--bloom-delay, 0ms) + var(--i, 0) * 60ms);
+}
+.flower-bloom .bud {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: bud-open 600ms var(--ease-bloom) both;
+  animation-delay: calc(var(--bloom-delay, 0ms) + var(--i, 0) * 50ms);
+}
+
+/* the workflow vine on the landing page draws itself in */
+.vine-path {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+}
+.vine-on .vine-path {
+  animation: stem-grow 2.2s var(--ease-soft) forwards;
+}
+
+/* Claude-style moving sheen on the line that says what the agents are doing */
+.shimmer-text {
+  background: linear-gradient(
+      100deg,
+      var(--ink-soft) 0%,
+      var(--ink-soft) 40%,
+      var(--ink) 50%,
+      var(--ink-soft) 60%,
+      var(--ink-soft) 100%
+    )
+    0 0 / 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer 2.4s linear infinite;
+}
+
+/* ---------- agent prose (chat replies, rendered markdown) ---------- */
+
+.prose-agent {
+  font-family: var(--font-serif);
+  font-optical-sizing: auto;
+  font-variation-settings: "SOFT" 50, "WONK" 0;
+  font-size: 1.0625rem;
+  line-height: 1.7;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.prose-agent > * + * {
+  margin-top: 0.85em;
+}
+.prose-agent h3,
+.prose-agent h4 {
+  font-weight: 560;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  margin-top: 1.25em;
+}
+.prose-agent h3 {
+  font-size: 1.25rem;
+}
+.prose-agent h4 {
+  font-size: 1.0625rem;
+}
+.prose-agent strong {
+  font-weight: 620;
+}
+.prose-agent a {
+  color: var(--clay-ink);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  text-decoration-color: color-mix(in oklab, var(--clay-ink) 45%, transparent);
+  transition: text-decoration-color 160ms;
+}
+.prose-agent a:hover {
+  text-decoration-color: var(--clay-ink);
+}
+.prose-agent ul,
+.prose-agent ol {
+  padding-left: 1.35em;
+}
+.prose-agent ul > li {
+  list-style: none;
+  position: relative;
+}
+.prose-agent ul > li::before {
+  /* a single petal as the bullet */
+  content: "";
+  position: absolute;
+  left: -1.05em;
+  top: 0.62em;
+  width: 0.42em;
+  height: 0.58em;
+  border-radius: 50% 50% 50% 50% / 62% 62% 38% 38%;
+  background: var(--peony);
+  transform: rotate(-30deg);
+}
+.prose-agent ul > li:nth-child(6n + 2)::before {
+  background: var(--buttercup);
+}
+.prose-agent ul > li:nth-child(6n + 3)::before {
+  background: var(--sage);
+}
+.prose-agent ul > li:nth-child(6n + 4)::before {
+  background: var(--mint);
+}
+.prose-agent ul > li:nth-child(6n + 5)::before {
+  background: var(--cornflower);
+}
+.prose-agent ul > li:nth-child(6n + 6)::before {
+  background: var(--lavender);
+}
+.prose-agent ol > li {
+  list-style: decimal;
+}
+.prose-agent ol > li::marker {
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+.prose-agent li + li {
+  margin-top: 0.3em;
+}
+.prose-agent code {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  background: var(--paper-2);
+  border-radius: 6px;
+  padding: 0.12em 0.38em;
+}
+.prose-agent pre {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  line-height: 1.6;
+  background: var(--paper-2);
+  border-radius: 14px;
+  padding: 0.9rem 1rem;
+  overflow-x: auto;
+}
+.prose-agent pre code {
+  background: transparent;
+  padding: 0;
+  font-size: inherit;
+}
+.prose-agent blockquote {
+  border-left: 3px solid var(--peony);
+  padding-left: 0.9em;
+  color: var(--ink-soft);
+}
+.prose-agent table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-sans);
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}
+.prose-agent th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--ink-soft);
+  font-size: 0.8125rem;
+  padding: 0.4rem 0.75rem 0.4rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.prose-agent td {
+  padding: 0.45rem 0.75rem 0.45rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+/* word-by-word reveal for replies that just arrived */
+.word-in {
+  animation: word-in 420ms var(--ease-soft) both;
+}
+
+/* ---------- React Flow, dressed for the garden ---------- */
+
+.react-flow {
+  --xy-background-color: transparent;
+  --xy-edge-stroke: var(--ink-faint);
+  --xy-edge-stroke-selected: var(--clay);
+  --xy-connectionline-stroke: var(--clay);
+  --xy-attribution-background-color: transparent;
+  --xy-controls-button-background-color: var(--raised);
+  --xy-controls-button-background-color-hover: var(--paper-2);
+  --xy-controls-button-color: var(--ink);
+  --xy-controls-button-color-hover: var(--ink);
+  --xy-controls-button-border-color: var(--line);
+  --xy-minimap-background-color: var(--raised);
+  --xy-minimap-mask-background-color: color-mix(in oklab, var(--paper-2) 70%, transparent);
+  --xy-selection-background-color: color-mix(in oklab, var(--clay) 8%, transparent);
+  --xy-selection-border: 1px dashed var(--clay);
+}
+.react-flow__controls {
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  box-shadow: var(--float-shadow);
+}
+.react-flow__controls-button {
+  width: 32px;
+  height: 32px;
+}
+.react-flow__minimap {
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  box-shadow: var(--float-shadow);
+}
+.react-flow__attribution {
+  opacity: 0.5;
+  font-size: 10px;
+}
+.react-flow__attribution a {
+  color: var(--ink-faint);
+}
+.react-flow__edge-path {
+  stroke-width: 1.75;
+}
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke-width: 2.25;
+}
+.react-flow__handle {
+  transition: scale 200ms var(--ease-bloom);
+}
+.react-flow__handle:hover {
+  scale: 1.3;
+}
+.react-flow__node:focus-visible {
+  outline: none;
+}
+.react-flow__edge-path {
+  stroke: color-mix(in oklab, var(--stem) 85%, var(--ink-faint));
+}
+.react-flow__edge.animated .react-flow__edge-path {
+  stroke-dasharray: 6 5;
+}
+.react-flow__edge.selected .react-flow__edge-path,
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke: var(--clay);
+}
+
+/* one handle style for every node; --h is the node's flower colour */
+.gp-handle.react-flow__handle {
+  width: 14px;
+  height: 14px;
+  border-radius: 99px;
+  background: var(--h, var(--clay));
+  border: 3px solid var(--raised);
+  box-shadow: 0 0 0 1.5px color-mix(in oklab, var(--h, var(--clay)) 60%, var(--ink-faint));
+}
+
+/* ---------- scrollbars ---------- */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 99px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+/* ---------- keyframes ---------- */
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 18px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
   }
 }
-@theme inline {
-  --animate-spotlight: spotlight 2s ease 0.75s 1 forwards;
+@keyframes rise-sm {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 8px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
-
-@keyframes spotlight {
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes bloom {
+  from {
+    opacity: 0;
+    transform: scale(0.6) rotate(-24deg);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes node-in {
+  from {
+    opacity: 0;
+    transform: scale(0.82);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes petal-open {
   0% {
     opacity: 0;
-    transform: translate(-72%, -62%) scale(0.5);
+    transform: scale(0.15, 0.3);
+  }
+  60% {
+    opacity: 1;
   }
   100% {
     opacity: 1;
-    transform: translate(-50%, -40%) scale(1);
+    transform: none;
+  }
+}
+@keyframes pollen-in {
+  from {
+    opacity: 0;
+    transform: scale(0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes petal-pulse {
+  0%,
+  100% {
+    transform: scale(0.55);
+    opacity: 0.45;
+  }
+  35% {
+    transform: scale(1.04);
+    opacity: 1;
+  }
+  60% {
+    transform: scale(0.92);
+    opacity: 0.9;
+  }
+}
+@keyframes sway {
+  0%,
+  100% {
+    transform: rotate(-3deg);
+  }
+  50% {
+    transform: rotate(3deg);
+  }
+}
+@keyframes breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.035);
+  }
+}
+@keyframes float {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(0, -8px, 0);
+  }
+}
+@keyframes drift {
+  0% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+    opacity: 0;
+  }
+  8% {
+    opacity: var(--alpha, 0.7);
+  }
+  50% {
+    transform: translate3d(var(--dx, 40px), 55vh, 0) rotate(calc(var(--rot, 220deg) * 0.5));
+  }
+  92% {
+    opacity: var(--alpha, 0.7);
+  }
+  100% {
+    transform: translate3d(calc(var(--dx, 40px) * -0.4), 112vh, 0) rotate(var(--rot, 220deg));
+    opacity: 0;
+  }
+}
+@keyframes travel {
+  0% {
+    transform: translateX(0) rotate(0deg);
+    opacity: 0;
+  }
+  15%,
+  85% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(100cqw) rotate(200deg);
+    opacity: 0;
+  }
+}
+@keyframes stem-grow {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes leaf-unfurl {
+  from {
+    opacity: 0;
+    transform: scale(0.1) rotate(-25deg);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes bud-open {
+  from {
+    opacity: 0;
+    transform: scale(0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes plant-sway {
+  0%,
+  100% {
+    transform: rotate(-1.6deg);
+  }
+  50% {
+    transform: rotate(1.6deg);
+  }
+}
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -150% 0;
+  }
+}
+@keyframes word-in {
+  from {
+    opacity: 0;
+    filter: blur(3px);
+    transform: translate3d(0, 3px, 0);
+  }
+  to {
+    opacity: 1;
+    filter: none;
+    transform: none;
+  }
+}
+
+/* "Fewer and gentler, not none": keep fades, drop travel, loops and drift. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0ms !important;
+    transition-duration: 120ms !important;
+    scroll-behavior: auto !important;
+  }
+  .drift-petal,
+  .motion-ambient {
+    display: none !important;
+  }
+  .blossom-loading .petal {
+    opacity: 1;
+    transform: none;
   }
 }

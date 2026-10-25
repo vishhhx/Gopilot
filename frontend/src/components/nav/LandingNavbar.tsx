@@ -1,101 +1,116 @@
-import Logo from "./Logo";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { motion, useMotionValueEvent, useScroll } from "framer-motion";
-import { useRef, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
+import { Menu, X } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { useAppSelector } from "@/store/hooks";
-interface NavItem {
-  name: string;
-  href: string;
-}
+import { Button } from "@/components/ui/button";
+import Logo from "./Logo";
 
+const LINKS = [
+  { name: "How it works", href: "#how" },
+  { name: "Apps", href: "#apps" },
+  { name: "Workflows", href: "#workflows" },
+  { name: "Pricing", href: "#pricing" },
+];
+
+/** Wordmark, four links and one action. Gains a ground once the page scrolls. */
 function LandingNavbar() {
-  const { authData, isAuthenticated } = useAppSelector((state) => state.auth);
-  console.log(authData);
-  const navElements: NavItem[] = [
-    { name: "How it works", href: "#" },
-    { name: "Benefits", href: "#" },
-    { name: "Features", href: "#" },
-    { name: "Pricing", href: "#" },
-    { name: "Testimonials", href: "#" },
-  ];
+  const isAuthenticated = useAppSelector((s) => s.auth.isAuthenticated);
+  const [scrolled, setScrolled] = useState(false);
+  const [open, setOpen] = useState(false);
 
-  const ref = useRef<HTMLDivElement | null>(null);
-  const [scrolled, setScrolled] = useState<boolean>(false);
-  const { scrollY } = useScroll({
-    target: ref,
-  });
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 24);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
 
-  useMotionValueEvent(scrollY, "change", (latest) => {
-    const newChange = latest / 100;
-    setScrolled(newChange > 2);
-  });
+  const cta = isAuthenticated ? { to: "/new", label: "Open GoPilot" } : { to: "/login", label: "Get started" };
 
   return (
-    <motion.div
-      className=" fixed top-0 mx-auto -right-0 -left-0 z-50   p-3 flex justify-between items-center gap-20 dark:text-neutral-100 backdrop-blur-lg transition-all duration-300  "
-      initial={{ opacity: 1, filter: "blur(10px)" }}
-      animate={{ opacity: [0, 0.5, 1], filter: "blur(0px)" }}
-      transition={{
-        duration: 0.3,
-        ease: [0.33, 1, 0.68, 1],
-        delay: 0.3,
-      }}
-      ref={ref}
-      style={{
-        width: scrolled ? "70rem" : "80rem",
-        borderRadius: scrolled ? "25px" : "0px",
-        boxShadow: scrolled
-          ? "inset 0 0 10px rgba(20, 255, 255, 0.2)"
-          : "inset 0 0 0 rgba(0, 0, 0, 0)",
-        marginTop: scrolled ? "20px" : "0px",
-      }}
-    >
-      <Logo />
-      <div className="flex text-sm gap-6">
-        {navElements.map((item, idx) => (
-          <Link
-            key={idx}
-            to={item.href}
-            className="hover:text-neutral-600 hover:dark:text-neutral-400 cursor-pointer"
-          >
-            {item.name}
-          </Link>
-        ))}
-      </div>
-
-      {isAuthenticated ? (
-        <div className="flex flex-row-reverse gap-3 items-center cursor-pointer">
-          <Link
-            to="/dashboard"
-            className="py-2 px-3 bg-neutral-950 dark:bg-neutral-100 rounded-xl dark:text-black text-neutral-100 hover:-translate-y-1 transition duration-300"
-          >
-            Get Started
-          </Link>
-          <div>
-            <img
-              src={authData?.avatarUrl}
-              alt=""
-              className="rounded-full size-10 border-1  border-white"
-            />
-          </div>
-        </div>
-      ) : (
-        <div className="flex gap-2 text-sm">
-          <Link
-            to="/login"
-            className="px-4 py-1.5 hover:backdrop-blur-2xl hover:bg-neutral-600/40 rounded-xl transition-all duration-300"
-          >
-            Login
-          </Link>
-          <Link
-            to="/signup"
-            className="px-3 py-1.5 bg-black rounded-xl dark:bg-neutral-600/40 dark:hover:bg-neutral-600/10 text-neutral-100 shadow-[inset_0_0_30px_rgba(0,255,255,0.)] border-[0.5px] border-neutral-200 transition duration-300"
-          >
-            Sign Up
-          </Link>
-        </div>
+    <motion.header
+      initial={{ y: -16, opacity: 0 }}
+      animate={{ y: 0, opacity: 1 }}
+      transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1], delay: 0.15 }}
+      className={cn(
+        "fixed inset-x-0 top-0 z-50 transition-[background-color,box-shadow] duration-300",
+        scrolled || open ? "bg-paper/95 shadow-[0_1px_0_var(--line)]" : "bg-transparent"
       )}
-    </motion.div>
+    >
+      <nav className="mx-auto flex h-16 max-w-[1240px] items-center justify-between gap-6 px-5 sm:px-8" aria-label="Main">
+        <a href="#top" className="rounded-lg" aria-label="GoPilot, back to top">
+          <Logo motion="bloom" />
+        </a>
+
+        <ul className="hidden items-center gap-1 md:flex">
+          {LINKS.map((l) => (
+            <li key={l.href}>
+              <a
+                href={l.href}
+                className="rounded-full px-3.5 py-2 text-[15px] text-ink transition-colors hover:bg-paper-2"
+              >
+                {l.name}
+              </a>
+            </li>
+          ))}
+        </ul>
+
+        <div className="hidden items-center gap-2 md:flex">
+          {!isAuthenticated && (
+            <Link to="/login" className="rounded-full px-3.5 py-2 text-[15px] text-ink transition-colors hover:bg-paper-2">
+              Sign in
+            </Link>
+          )}
+          <Button asChild>
+            <Link to={cta.to}>{cta.label}</Link>
+          </Button>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className="inline-flex size-10 items-center justify-center rounded-full text-ink hover:bg-paper-2 md:hidden"
+          aria-label={open ? "Close menu" : "Open menu"}
+          aria-expanded={open}
+        >
+          {open ? <X className="size-5" /> : <Menu className="size-5" />}
+        </button>
+      </nav>
+
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.2 }}
+            className="border-t border-line bg-paper px-5 pt-2 pb-5 md:hidden"
+          >
+            <ul className="space-y-1">
+              {LINKS.map((l) => (
+                <li key={l.href}>
+                  <a href={l.href} onClick={() => setOpen(false)} className="block rounded-xl px-3 py-3 text-[17px] hover:bg-paper-2">
+                    {l.name}
+                  </a>
+                </li>
+              ))}
+            </ul>
+            <div className="mt-3 flex gap-2">
+              {!isAuthenticated && (
+                <Button asChild variant="outline" className="flex-1" size="lg">
+                  <Link to="/login">Sign in</Link>
+                </Button>
+              )}
+              <Button asChild className="flex-1" size="lg">
+                <Link to={cta.to}>{cta.label}</Link>
+              </Button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.header>
   );
 }
 

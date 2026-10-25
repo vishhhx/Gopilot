@@ -6,12 +6,12 @@ import { corsConfig } from "./utils";
 import { authRouter } from "./routes";
 import { connectionRouter } from "./routes/connetion";
 import path from "path";
-import { fileURLToPath } from "url";
 import { Agentrouter } from "./routes/agent";
 import { SesstionRouter } from "./routes/sesstion";
-import testrouter from "./test.routes";
+// import testrouter from "./test.routes";
 import workflowRouter from "./routes/workflow";
 import { otherRouter } from "./routes/other";
+import hubRouter from "./routes/hub";
 const app: Application = express();
 const httpServer = createServer(app);
 
@@ -32,7 +32,8 @@ app.use("/api/v1/auth", authRouter);
 app.use("/api/v1/connection", connectionRouter);
 app.use("/api/v1/agent", Agentrouter);
 app.use("/api/v1/session", SesstionRouter);
-app.use("/api", testrouter);
+// app.use("/api", testrouter);
 app.use("/api/v1/workflow", workflowRouter);
 app.use("/api/v1/others",otherRouter)
+app.use("/api/v1/hub",hubRouter)
 export { httpServer };

@@ -58,49 +58,6 @@ export const getAllServices = asyncHandler(
   }
 );
 
-export const addConnectionDef = asyncHandler(
-  async (req: Request, res: Response) => {
-    const connectionDefs: IConnectionDef[] = req.body;
-
-    if (!Array.isArray(connectionDefs) || connectionDefs.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Request body must be a non-empty array of connection definitions.",
-      });
-    }
-
-    const existing = await ConnectionDefinition.find({
-      $or: connectionDefs.map((def) => ({
-        provider: def.provider,
-        service: def.service,
-      })),
-    }).select("provider service");
-
-    const existingKeys = new Set(
-      existing.map((e) => `${e.provider}:${e.service}`)
-    );
-    const newDefs = connectionDefs.filter(
-      (def) => !existingKeys.has(`${def.provider}:${def.service}`)
-    );
-
-    if (newDefs.length === 0) {
-      return res.status(200).json({
-        success: false,
-        message: "All provided connection definitions already exist.",
-      });
-    }
-
-    const inserted = await ConnectionDefinition.insertMany(newDefs);
-
-    return res.status(201).json({
-      success: true,
-      message: `${inserted.length} connection definition(s) added successfully.`,
-      data: inserted,
-    });
-  }
-);
-
 export const GoogleServiceInt = asyncHandler(
   async (req: Request, res: Response) => {
     const { scopes, service } = req.body;

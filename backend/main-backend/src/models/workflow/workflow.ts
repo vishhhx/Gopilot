@@ -20,12 +20,47 @@ export interface NodeType {
   dragging?: boolean;
 }
 
+export const INPUT_FIELD_TYPES = [
+  // basic
+  "text",
+  "long_text",
+  "number",
+  "yes_no",
+  "select",
+  "date",
+  "time",
+  "datetime",
+  "email",
+  "email_list",
+  "url",
+  // picked from the user's Google account
+  "spreadsheet",
+  "drive_file",
+  "drive_folder",
+  "form",
+  "gmail_label",
+  "calendar",
+] as const;
+export type InputFieldType = (typeof INPUT_FIELD_TYPES)[number];
+
+/** A value the user fills in each time the workflow runs; agent tasks refer to it as {{key}}. */
+export interface InputField {
+  key: string;
+  label: string;
+  type: InputFieldType;
+  required: boolean;
+  description?: string;
+  /** choices for a "select" field */
+  options?: string[];
+}
+
 export interface WorkflowDocument extends Document {
   userId: Types.ObjectId;
   title?: string;
   description?: string;
   nodes: NodeType[];
   edges: EdgeType[];
+  inputs: InputField[];
   isPublic: boolean;
   isDeleted: boolean;
   createdAt: Date;
@@ -73,6 +108,22 @@ const EdgeSchema = new Schema(
   },
   { _id: false }
 );
+const InputFieldSchema = new Schema(
+  {
+    key: { type: String, required: true },
+    label: { type: String, required: true },
+    type: {
+      type: String,
+      enum: INPUT_FIELD_TYPES,
+      default: "text",
+    },
+    required: { type: Boolean, default: true },
+    description: { type: String },
+    options: { type: [String], default: undefined },
+  },
+  { _id: false }
+);
+
 const WorkflowSchema = new Schema<WorkflowDocument>(
   {
     userId: { type: Schema.Types.ObjectId, ref: "Auth", required: true },
@@ -82,6 +133,7 @@ const WorkflowSchema = new Schema<WorkflowDocument>(
 
     nodes: { type: [NodeSchema], default: [] },
     edges: { type: [EdgeSchema], default: [] },
+    inputs: { type: [InputFieldSchema], default: [] },
 
     isPublic: { type: Boolean, default: false },
     isDeleted: { type: Boolean, default: false },
@@ -93,3 +145,5 @@ export const WorkflowModel = model<WorkflowDocument>(
   "Workflows",
   WorkflowSchema
 );
+
+

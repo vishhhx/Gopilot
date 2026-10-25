@@ -21,7 +21,6 @@ import { RunContext } from "@openai/agents";
 //   return res[0].refreshToken;
 // }
 function getRefreshToken(tokens: any) {
-  console.log("🔍 Tokens received:", tokens);
 
   // If tokens is an array
   if (Array.isArray(tokens)) {
